@@ -1,0 +1,31 @@
+# Frontend
+frontend/node_modules/
+frontend/dist/
+frontend/coverage/
+
+# Backend
+backend/.venv/
+backend/.uv-cache/
+**/__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+
+# Environment and local data
+.env
+backend/.env
+*.db
+*.db-shm
+*.db-wal
+data/
+runtime-data/
+exports/
+
+# Test and editor artifacts
+output/
+test-results/
+.playwright-cli/
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db

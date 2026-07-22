@@ -1,0 +1,75 @@
+const outerMarkdownFence = /^\s*```(?:markdown|md)?\s*\n([\s\S]*?)\n```\s*$/i
+const fenceLine = /^\s*(`{3,}|~{3,})/
+const listDisplayStart = /^(\s*)((?:[-+*]|\d+[.)]))\s+\\\[\s*$/
+const inlineDisplayMath = /\\\[([^\n]+?)\\\]/g
+const htmlBreak = /<br\s*\/?>/gi
+
+export function normalizeMarkdownMath(content: string) {
+  const outerMatch = content.match(outerMarkdownFence)
+  const source = outerMatch ? outerMatch[1] : content
+  let activeFence: string | null = null
+
+  const lines = source.split(/\r?\n/)
+  const normalized: string[] = []
+
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index]
+    const fenceMatch = line.match(fenceLine)
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0]
+      activeFence = activeFence === marker ? null : marker
+      normalized.push(line)
+      continue
+    }
+    if (activeFence !== null) {
+      normalized.push(line)
+      continue
+    }
+
+    line = line.replace(htmlBreak, '  \n')
+
+    const listMatch = line.match(listDisplayStart)
+    if (listMatch) {
+      let closingIndex = index + 1
+      while (closingIndex < lines.length && lines[closingIndex].trim() !== String.raw`\]`) {
+        closingIndex += 1
+      }
+      if (closingIndex < lines.length) {
+        const body = lines
+          .slice(index + 1, closingIndex)
+          .map((part) => part.trim())
+          .filter(Boolean)
+          .join(' ')
+        normalized.push(`${listMatch[1]}${listMatch[2]} $${body}$`)
+        index = closingIndex
+        continue
+      }
+    }
+
+    if ([String.raw`\[`, String.raw`\]`].includes(line.trim())) {
+      normalized.push(`${line.match(/^\s*/)?.[0] ?? ''}$$`)
+      continue
+    }
+    line = line.replace(inlineDisplayMath, '$$$1$')
+    normalized.push(line.replaceAll(String.raw`\(`, '$').replaceAll(String.raw`\)`, '$'))
+  }
+
+  return normalized.join('\n').trim()
+}
+
+export function hasLegacyMathDelimiters(content: string) {
+  let activeFence: string | null = null
+  return content.split(/\r?\n/).some((line) => {
+    const match = line.match(fenceLine)
+    if (match) {
+      const marker = match[1][0]
+      activeFence = activeFence === marker ? null : marker
+      return false
+    }
+    if (activeFence !== null) return false
+    return line.includes(String.raw`\(`)
+      || line.includes(String.raw`\)`)
+      || line.trim() === String.raw`\[`
+      || line.trim() === String.raw`\]`
+  })
+}
