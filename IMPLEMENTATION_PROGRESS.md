@@ -4,10 +4,10 @@
 
 ## 当前阶段
 
-- 项目阶段：第一版阶段 31，v0.1.0 公开发布候选已完成本地验收。
-- 当前目标：提交经过验证的公开源码，构建与提交绑定的最终资产，并发布 GitHub 预览版。
-- 最后更新时间：2026-07-23。
-- 当前结论：v0.1.0 的功能、依赖、公开文档、实际截图、SBOM、源码包和 Windows 安装生命周期均已建立可重复验收路径；当前安装器未代码签名，因此本次按 Public Preview 发布并明确 SmartScreen 风险。
+- 项目阶段：第一版阶段 31，Lumina v0.1.0 Public Preview 已发布。
+- 当前目标：收集首个公开版本的实际使用反馈，并在后续版本处理代码签名和已确认改进。
+- 最后更新时间：2026-07-24。
+- 当前结论：公开仓库、`main`、`v0.1.0` 标签、GitHub Actions 和预发布 Release 均已完成远端验收；5 个发布资产摘要一致。安装器未代码签名，Release 和 README 已明确 SmartScreen 风险。
 
 ## 功能状态
 
@@ -32,20 +32,20 @@
 | 学习记忆 | `DONE` | 课程页可编辑用户维护的课程记忆，并查看独立自动课程脉络、章节记忆和小节记忆；每日完成由一次 Codex 调用生成紧凑摘要并同时更新小节和章节记忆，手动整理作为修复入口 | 三层记忆 API、AI 每日摘要、全部学习来源聚合、课程概览不覆盖、结构化生成和持久化测试通过 |
 | 设置 | `DONE` | 模型连接、Vault、字号、材料库和混合检索保持不变；独立运行状态已合并为底部“本地服务与运行状态”。设置页不再承担首次使用流程，旧 `?setup=1` 不产生特殊界面 | 设置服务版本、在线状态、旧路由锚点、旧首次设置入口移除、桌面与 390px 无溢出和控制台零错误通过 |
 | Windows 安装与启动 | `DONE` | 安装包命名为 `install_Lumina-版本号.exe`，内部卸载组件位于 `uninstall_Lumina`；运行中卸载先等待 PID 对应服务完全退出，再精准删除程序文件并保留用户文件和默认学习数据 | QA 运行中卸载约 3.11 秒完成，端口、`Lumina.exe`、`_internal` 和纯程序目录全部清理；用户文件边界、默认数据保留及生产安装器编译通过 |
-| 公开发布 | `IN_PROGRESS` | `Throb7777/lumina-study-coach`、`main` 和 `v0.1.0` 预发布 Release 已建立，安装器、源码 ZIP、清单、SBOM 和校验文件已上传 | 远端提交、标签和 5 个资产哈希已核对；首次 CI 暴露 npm 版本及 Codex 测试机器依赖，修复已在本机通过，待推送复验 |
+| 公开发布 | `DONE` | `Throb7777/lumina-study-coach` 已公开，`v0.1.0` Public Preview 包含安装器、源码 ZIP、发布清单、CycloneDX SBOM 和 SHA-256 文件 | `main`、标签和 Release 目标均指向 `a31a2e2`；GitHub Actions 前后端 job 成功，5 个远端资产摘要与本地一致 |
 
 ## 当前正在进行
 
-- 当前任务：修复首次 GitHub Windows Runner 暴露的两项 CI 可移植性问题并完成远端复验。
-- 最近完成：公开仓库、`main`、`v0.1.0` 标签和预发布 Release 已建立，5 个发布资产上传并完成远端 SHA-256 核对；CI 现固定 npm 11，Codex 初始化测试不再依赖 Runner 安装 Codex。
+- 当前任务：Lumina v0.1.0 首次公开预览发布已完成。
+- 最近完成：修复 GitHub Windows Runner 的 npm 版本和 Codex 测试机器依赖；重新构建并扫描安装器，刷新标签与全部资产，最终 CI 和远端摘要核对通过。
 - 本轮范围：未读取或修改正式学习数据库、正式材料、正式 Obsidian Vault、端口 8000、模型登录和用户设置。QA 只使用端口 8127、工作区 `output/` 和 `%LOCALAPPDATA%\Lumina-QA`，验收后全部清理。
 - 验收结论：前端 87 项测试、后端与启动器 118 项测试、Ruff、Alembic、锁文件、PowerShell 解析、元数据和差异检查通过；npm 与 Python 依赖审计均为 0 个已知漏洞。QA 可执行文件健康检查通过，隔离安装、真实启动、运行中卸载、默认数据保留和清理均通过。
 
 ## 下一步
 
-1. 推送 CI 可移植性修复并确认 GitHub Actions 前后端作业通过。
-2. 将 `v0.1.0` 标签和源码类发布资产更新到最终修复提交。
-3. 远端复核仓库、Release、资产哈希和默认分支后完成阶段 31。
+1. 通过 GitHub Issues 收集 v0.1.0 的安装、材料解析、AI 连接和 Obsidian 实际使用反馈。
+2. 后续公开版本优先配置可信 Windows 代码签名，消除 SmartScreen 未知发布者提示。
+3. 只在确认真实需求或缺陷后进入下一阶段，不扩大第一版范围。
 
 ## 阻塞与待确认
 
@@ -755,3 +755,11 @@
 - 依赖与安全：升级 FastEmbed `0.8.0` 和 Pillow `12.3.0`，保留 Starlette 官方建议的 `httpx2` 测试依赖。Python 与 npm 漏洞审计均为 0 个已知漏洞；源码密钥、私钥和个人绝对路径扫描无匹配。全前端检查通过 87 项 Vitest，后端与启动器通过 118 项 pytest，Ruff、Alembic、uv 锁、PowerShell 解析、版本元数据和 `git diff --check` 通过。
 - 实际安装回归：QA 安装包使用独立 AppId、端口 `8127` 和 `%LOCALAPPDATA%\Lumina-QA`。安装后程序与三份许可文件齐全，服务健康检查成功；运行中静默卸载会先停止服务、删除程序目录并保留材料哨兵，最后 QA 数据、程序目录和端口均已清理。一次验收命令因 `/DIR` 引号拆分误装到 `D:\Everything\Desk\study`，已立即使用该实例自身卸载器完整清理，修正引号后同一测试通过。
 - 发布限制：安装器与 `Lumina.exe` 仍未代码签名，本版按 Public Preview 发布。当前记录完成的是本地发布候选验收；GitHub 仓库、标签、Release 和远端资产验证将在发布完成后更新。
+
+### 2026-07-24 - Lumina v0.1.0 Public Preview 发布
+
+- GitHub 发布：创建公开仓库 `https://github.com/Throb7777/lumina-study-coach`，默认分支为 `main`；创建 `v0.1.0` 预发布 Release，并上传 Windows 安装器、验证后的源码 ZIP、发布清单、CycloneDX SBOM 和 `SHA256SUMS.txt`。
+- CI 修复：首次 GitHub Windows Runner 发现 Node 22 自带 npm 与项目 npm 11 锁文件不一致，以及一项 Codex 初始化测试隐含依赖本机安装 Codex。CI 现固定 npm `11.6.1`，测试显式使用虚拟可执行路径；本机前端 87 项、后端与启动器 118 项测试复验通过。
+- 远端验收：GitHub Actions 运行 `30026337450` 的 `frontend` 和 `backend-and-launcher` 均为 `success`。远端 `main`、`v0.1.0` 标签和 Release 目标均指向 `a31a2e29062cf6bd7cbd776b23ff26dc86a41e8a`。
+- 资产验收：最终安装器经 Windows Defender 扫描未发现威胁；远端 5 个资产的文件大小和 GitHub SHA-256 digest 与本地逐一一致。最终安装器 SHA-256 为 `D33B85A8A0BADF8C15498E46CA92B62E7C83D63153FF64628A5A42A81DD1D78E`，源码 ZIP SHA-256 为 `35E3CA2AA988DD454F54A76F043155B832695CB3D6360D7F76484CC82E3CC0D0`。
+- 网络说明：本机失效的 `HTTP_PROXY/HTTPS_PROXY=127.0.0.1:7890` 和不可达的 `github.com:443` 使普通 Git HTTPS 推送失败；已使用现有 GitHub CLI 授权通过官方 Git Data API 上传并逐对象校验 SHA，没有新增 SSH key、deploy key 或长期凭据。
