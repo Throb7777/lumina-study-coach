@@ -570,6 +570,7 @@ def test_codex_declares_experimental_api_capability_on_initialize(
     monkeypatch,
 ) -> None:
     codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+    codex.executable = tmp_path / "codex.exe"
     captured: dict = {}
 
     class FakeStream:
