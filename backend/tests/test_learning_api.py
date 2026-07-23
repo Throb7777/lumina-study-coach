@@ -1,3 +1,5 @@
+from datetime import UTC, datetime, timedelta
+
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy import func, select
@@ -110,3 +112,52 @@ def test_missing_parents_return_not_found(client: TestClient) -> None:
     assert client.post("/api/courses/999/chapters", json={"title": "章节"}).status_code == 404
     assert client.post("/api/chapters/999/sections", json={"title": "小节"}).status_code == 404
     assert client.post("/api/sections/999/daily-records/today").status_code == 404
+
+
+def test_course_list_prioritizes_recent_activity_and_places_completed_last(
+    client: TestClient, app: FastAPI
+) -> None:
+    course_ids: dict[str, int] = {}
+    record_ids: dict[str, int] = {}
+    for name in ["较早学习", "最近学习", "尚未开始", "已经完成"]:
+        course = client.post("/api/courses", json={"name": name}).json()
+        course_ids[name] = course["id"]
+        chapter = client.post(
+            f"/api/courses/{course['id']}/chapters", json={"title": "第一章"}
+        ).json()
+        section = client.post(
+            f"/api/chapters/{chapter['id']}/sections", json={"title": "第一节"}
+        ).json()
+        if name != "尚未开始":
+            record = client.post(f"/api/sections/{section['id']}/daily-records/today").json()
+            record_ids[name] = record["id"]
+
+    now = datetime.now(UTC)
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        session.get(DailyRecord, record_ids["较早学习"]).updated_at = now - timedelta(days=3)
+        session.get(DailyRecord, record_ids["最近学习"]).updated_at = now - timedelta(hours=1)
+        completed = session.get(Course, course_ids["已经完成"])
+        completed.completed_at = now - timedelta(days=1)
+        session.commit()
+
+    courses = client.get("/api/courses").json()
+    assert [course["name"] for course in courses] == [
+        "最近学习",
+        "较早学习",
+        "尚未开始",
+        "已经完成",
+    ]
+    assert [course["course_state"] for course in courses] == [
+        "active",
+        "active",
+        "not_started",
+        "completed",
+    ]
+    assert courses[0]["last_study_at"] is not None
+    assert courses[2]["last_study_at"] is None
+    assert all(course["created_at"] for course in courses)
+    assert all(
+        datetime.fromisoformat(course["created_at"].replace("Z", "+00:00")).tzinfo == UTC
+        for course in courses
+    )

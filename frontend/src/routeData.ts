@@ -5,7 +5,6 @@ import type {
   CourseLearningMemory,
   CourseSummary,
   DailyRecord,
-  HealthResponse,
   LocalSettings,
   MistakeIndexItem,
   MistakeScopeCourse,
@@ -17,6 +16,8 @@ import type {
 export interface CoursesRouteData {
   courses: CourseSummary[]
   error: string
+  onboardingError: string
+  onboardingPending: boolean
 }
 
 export interface CourseRouteData {
@@ -45,10 +46,6 @@ export interface SectionNoteRouteData {
   error: string
   notFound: boolean
   vaultMissing: boolean
-}
-
-export interface StatusRouteData {
-  health: HealthResponse | null
 }
 
 export interface MistakesRouteData {
@@ -84,11 +81,25 @@ function message(error: unknown, fallback: string) {
 }
 
 export async function coursesLoader({ request }: LoaderFunctionArgs): Promise<CoursesRouteData> {
-  try {
-    return { courses: await api.listCourses(request.signal), error: '' }
-  } catch (error) {
-    if (isAbortError(error)) throw error
-    return { courses: [], error: message(error, '读取课程失败') }
+  const [coursesResult, onboardingResult] = await Promise.all([
+    api.listCourses(request.signal)
+      .then((courses) => ({ courses, error: '' }))
+      .catch((error: unknown) => {
+        if (isAbortError(error)) throw error
+        return { courses: [], error: message(error, '读取课程失败') }
+      }),
+    api.getOnboardingStatus(request.signal)
+      .then((status) => ({ pending: status.pending, error: '' }))
+      .catch((error: unknown) => {
+        if (isAbortError(error)) throw error
+        return { pending: false, error: message(error, '无法读取首次使用状态') }
+      }),
+  ])
+  return {
+    courses: coursesResult.courses,
+    error: coursesResult.error,
+    onboardingError: onboardingResult.error,
+    onboardingPending: onboardingResult.pending,
   }
 }
 
@@ -201,15 +212,6 @@ export async function libraryNoteLoader({ params, request }: LoaderFunctionArgs)
       notFound: error instanceof ApiError && error.status === 404,
       vaultMissing: error instanceof ApiError && error.status === 409,
     }
-  }
-}
-
-export async function statusLoader({ request }: LoaderFunctionArgs): Promise<StatusRouteData> {
-  try {
-    return { health: await api.getHealth(request.signal) }
-  } catch (error) {
-    if (isAbortError(error)) throw error
-    return { health: null }
   }
 }
 

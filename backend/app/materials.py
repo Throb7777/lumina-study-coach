@@ -2,8 +2,12 @@ from __future__ import annotations
 
 import hashlib
 import ipaddress
+import os
 import re
+import shutil
 import socket
+import subprocess
+import time
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
@@ -33,7 +37,12 @@ MAX_URL_BYTES = 8 * 1024 * 1024
 CHUNK_SIZE = 1800
 CHUNK_OVERLAP = 200
 MAX_CONTEXT_CHUNKS = 8
-MATERIAL_PARSER_VERSION = "structured-transcript-v2"
+MATERIAL_PARSER_VERSION = "ocr-hybrid-v3"
+REMOTE_RETRY_STATUSES = {429, 500, 502, 503, 504}
+REMOTE_MAX_ATTEMPTS = 3
+OCR_LANGUAGES = "chi_sim+eng"
+OCR_DPI = 200
+MIN_NATIVE_PAGE_CHARACTERS = 40
 
 
 class MaterialError(RuntimeError):
@@ -160,17 +169,122 @@ def chunk_text(text: str, heading: str = "", page_number: int | None = None):
         start = max(end - CHUNK_OVERLAP, start + 1)
 
 
+def _page_needs_ocr(page, text: str) -> bool:
+    if len(re.sub(r"\s+", "", text)) >= MIN_NATIVE_PAGE_CHARACTERS:
+        return False
+    try:
+        return bool(page.images)
+    except Exception:
+        return True
+
+
+def _tesseract_executable() -> str | None:
+    executable = shutil.which("tesseract")
+    if executable:
+        return executable
+    program_files = os.environ.get("PROGRAMFILES")
+    if program_files:
+        candidate = Path(program_files) / "Tesseract-OCR" / "tesseract.exe"
+        if candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _bundled_tessdata(path: Path) -> Path | None:
+    parents = path.resolve().parents
+    runtime_root = next((parent for parent in parents if parent.name == "runtime-data"), None)
+    if runtime_root is None:
+        return None
+    tessdata = runtime_root / "ocr" / "tessdata"
+    required = [tessdata / "chi_sim.traineddata", tessdata / "eng.traineddata"]
+    return tessdata if all(item.is_file() for item in required) else None
+
+
+def _ocr_pdf_page(path: Path, page_index: int) -> str:
+    executable = _tesseract_executable()
+    if not executable:
+        raise MaterialError(
+            "扫描 PDF 需要 Tesseract OCR。请安装 Tesseract，并确认中文 chi_sim 与英文 eng "
+            "语言包可用，然后在材料库点击重新解析。"
+        )
+    try:
+        import pypdfium2 as pdfium
+    except ImportError as error:
+        raise MaterialError("扫描 PDF 渲染组件未安装，请重新运行 Lumina 安装/修复") from error
+    with TemporaryDirectory(prefix="lumina-ocr-") as temporary:
+        image_path = Path(temporary) / f"page-{page_index + 1}.png"
+        with pdfium.PdfDocument(path) as document:
+            page = document[page_index]
+            try:
+                bitmap = page.render(scale=OCR_DPI / 72)
+                image = bitmap.to_pil()
+                try:
+                    image.save(image_path)
+                finally:
+                    image.close()
+            finally:
+                page.close()
+        command = [
+            executable,
+            str(image_path),
+            "stdout",
+        ]
+        tessdata = _bundled_tessdata(path)
+        if tessdata is not None:
+            command.extend(["--tessdata-dir", str(tessdata)])
+        command.extend([
+            "-l",
+            OCR_LANGUAGES,
+            "--psm",
+            "6",
+        ])
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=90,
+                check=False,
+                creationflags=0x08000000 if os.name == "nt" else 0,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MaterialError(f"第 {page_index + 1} 页 OCR 失败：{error}") from error
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or "请检查 Tesseract 语言包"
+            raise MaterialError(f"第 {page_index + 1} 页 OCR 失败：{detail}")
+        return completed.stdout.strip()
+
+
+def _ocr_cache_path(path: Path, source_digest: str, page_number: int) -> Path:
+    material_root = path.parent.parent if path.parent.name == "versions" else path.parent
+    key = hashlib.sha256(
+        f"{MATERIAL_PARSER_VERSION}:{source_digest}:{page_number}:{OCR_LANGUAGES}:{OCR_DPI}".encode()
+    ).hexdigest()
+    return material_root / "ocr-cache" / f"{key}.txt"
+
+
 def extract_pdf(path: Path) -> list[tuple[str, int | None, str]]:
     try:
         reader = PdfReader(path)
     except Exception as error:
         raise MaterialError(f"无法读取 PDF：{error}") from error
+    source_digest = content_hash(path.read_bytes())
     chunks: list[tuple[str, int | None, str]] = []
     for page_number, page in enumerate(reader.pages, start=1):
         text = page.extract_text() or ""
+        if _page_needs_ocr(page, text):
+            cache_path = _ocr_cache_path(path, source_digest, page_number)
+            if cache_path.is_file():
+                text = cache_path.read_text(encoding="utf-8")
+            else:
+                text = _ocr_pdf_page(path, page_number - 1)
+                cache_path.parent.mkdir(parents=True, exist_ok=True)
+                cache_path.write_text(text, encoding="utf-8")
         chunks.extend(chunk_text(text, f"第 {page_number} 页", page_number))
     if not chunks:
-        raise MaterialError("PDF 没有可提取文本，扫描件暂不支持")
+        raise MaterialError("PDF 没有可提取文本；如为扫描件，请确认 OCR 语言包后重新解析")
     return chunks
 
 
@@ -209,8 +323,28 @@ def fetch_url(url: str) -> tuple[str, str, bytes]:
             proxy=proxy or None,
             trust_env=False,
         ) as client:
-            response = client.get(url)
-            response.raise_for_status()
+            response: httpx.Response | None = None
+            for attempt in range(REMOTE_MAX_ATTEMPTS):
+                try:
+                    response = client.get(url)
+                except (httpx.TimeoutException, httpx.NetworkError):
+                    if attempt == REMOTE_MAX_ATTEMPTS - 1:
+                        raise
+                    time.sleep(float(2**attempt))
+                    continue
+                if response.status_code not in REMOTE_RETRY_STATUSES:
+                    response.raise_for_status()
+                    break
+                if attempt == REMOTE_MAX_ATTEMPTS - 1:
+                    response.raise_for_status()
+                retry_after = response.headers.get("retry-after", "")
+                try:
+                    delay = min(8.0, max(0.0, float(retry_after)))
+                except ValueError:
+                    delay = float(2**attempt)
+                time.sleep(delay or float(2**attempt))
+            if response is None:
+                raise MaterialError("读取 URL 失败：没有收到响应")
     except httpx.HTTPError as error:
         raise MaterialError(f"读取 URL 失败：{error}") from error
     validate_public_url(str(response.url))
@@ -409,11 +543,23 @@ def fetch_video_transcript(
         }
         if proxy:
             options["proxy"] = proxy
-        try:
-            with YoutubeDL(options) as downloader:
-                info = downloader.extract_info(url, download=True)
-        except Exception as error:
-            raise MaterialError(f"读取视频字幕失败：{error}") from error
+        info = None
+        for attempt in range(REMOTE_MAX_ATTEMPTS):
+            try:
+                with YoutubeDL(options) as downloader:
+                    info = downloader.extract_info(url, download=True)
+                break
+            except Exception as error:
+                message = str(error).lower()
+                transient = any(
+                    marker in message
+                    for marker in ("429", "too many requests", "timed out", "502", "503", "504")
+                )
+                if not transient or attempt == REMOTE_MAX_ATTEMPTS - 1:
+                    raise MaterialError(f"读取视频字幕失败：{error}") from error
+                time.sleep(float(2**attempt))
+        if info is None:
+            raise MaterialError("读取视频字幕失败：没有收到响应")
         files = sorted(Path(temporary).glob("subtitle*.vtt"))
         if not files:
             raise MaterialError("视频没有可用的中文或英文字幕")
@@ -564,6 +710,31 @@ def retrieve_material_evidence(
             if material.is_primary:
                 score += 1
             scored.append((float(score), material, chunk))
+    try:
+        from app.search_index import SearchDocument, hybrid_rank_bonuses
+
+        documents = {
+            f"{material.id}:{chunk.version_hash}:{chunk.position}": SearchDocument(
+                key=f"{material.id}:{chunk.version_hash}:{chunk.position}",
+                content=chunk.content,
+            )
+            for _, material, chunk in scored
+        }
+        rank_bonuses = hybrid_rank_bonuses(session, list(documents.values()), query)
+        scored = [
+            (
+                score
+                + rank_bonuses.get(
+                    f"{material.id}:{chunk.version_hash}:{chunk.position}", 0.0
+                ),
+                material,
+                chunk,
+            )
+            for score, material, chunk in scored
+        ]
+    except Exception:
+        # The derived search index must never block access to canonical material chunks.
+        pass
     scored.sort(key=lambda item: (item[0], item[1].is_primary, -item[2].position), reverse=True)
     chosen = scored[: max(0, max_chunks)]
     if not chosen:

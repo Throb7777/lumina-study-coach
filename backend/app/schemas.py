@@ -1,4 +1,4 @@
-from datetime import date, datetime
+from datetime import UTC, date, datetime
 from typing import Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -26,6 +26,14 @@ class ORMModel(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+def as_utc(value: datetime | None) -> datetime | None:
+    if value is None:
+        return None
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class AiRunRead(ORMModel):
     id: int
     provider: AiProvider
@@ -40,6 +48,11 @@ class AiRunRead(ORMModel):
     error_text: str
     created_at: datetime
     updated_at: datetime
+
+    @field_validator("created_at", "updated_at", mode="before")
+    @classmethod
+    def normalize_timestamps(cls, value: datetime) -> datetime:
+        return as_utc(value) or value
 
 
 class CourseCreate(BaseModel):
@@ -107,11 +120,24 @@ class CourseRead(ORMModel):
     completion_summary: str
     completion_summary_version: int
 
+    @field_validator("completed_at", mode="before")
+    @classmethod
+    def normalize_completed_at(cls, value: datetime | None) -> datetime | None:
+        return as_utc(value)
+
 
 class CourseSummary(CourseRead):
     total_sections: int = 0
     completed_sections: int = 0
     in_progress_sections: int = 0
+    course_state: Literal["active", "not_started", "completed"] = "not_started"
+    last_study_at: datetime | None = None
+    created_at: datetime
+
+    @field_validator("last_study_at", "created_at", mode="before")
+    @classmethod
+    def normalize_activity_timestamps(cls, value: datetime | None) -> datetime | None:
+        return as_utc(value)
 
 
 class CourseDetail(CourseRead):
@@ -398,8 +424,21 @@ class PreviousPreviewQuestions(BaseModel):
 class LocalSettingsRead(BaseModel):
     obsidian_vault_path: str
     learner_profile: str
+    service_version: str
     desktop_launch: bool = False
-    setup_pending: bool = False
+    semantic_search_enabled: bool = False
+    semantic_search_model_ready: bool = False
+
+
+class OnboardingStatusRead(BaseModel):
+    pending: bool
+
+
+class MaterialSearchSettingsRead(BaseModel):
+    semantic_enabled: bool
+    model_ready: bool
+    model: str
+    model_size: str
 
 
 class LearnerProfileUpdate(BaseModel):
@@ -517,6 +556,11 @@ class MaterialRead(BaseModel):
     last_success_at: datetime | None
     is_primary: bool
     chunk_count: int
+
+    @field_validator("last_refresh_at", "last_success_at", mode="before")
+    @classmethod
+    def normalize_refresh_timestamps(cls, value: datetime | None) -> datetime | None:
+        return as_utc(value)
 
 
 class MaterialRefreshRead(BaseModel):
@@ -762,3 +806,8 @@ class CourseCompletionRead(BaseModel):
     completed_at: datetime
     completion_summary: str
     completion_summary_version: int
+
+    @field_validator("completed_at", mode="before")
+    @classmethod
+    def normalize_completed_at(cls, value: datetime) -> datetime:
+        return as_utc(value) or value

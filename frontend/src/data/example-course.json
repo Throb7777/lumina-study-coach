@@ -1,0 +1,375 @@
+{
+  "schema_version": 1,
+  "kind": "read_only_example",
+  "course": {
+    "name": "MIT 18.06 线性代数示例",
+    "description": "用一组真实公开材料展示 Lumina 从回顾到小节笔记的完整学习闭环。",
+    "learning_goal": "理解线性方程组的行图像、列图像与矩阵表示。",
+    "chapter": "第一章 线性方程",
+    "section": "第一讲 线性方程的几何图像",
+    "study_date": "2026-07-22"
+  },
+  "materials": [
+    {
+      "type": "url",
+      "title": "MIT OCW Lecture 1 course page",
+      "description": "课程页正文，概括 row method、column method 与 matrix method。",
+      "href": "https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/resources/lecture-1-the-geometry-of-linear-equations/"
+    },
+    {
+      "type": "pdf",
+      "title": "MIT 18.06 Lecture 1 transcript",
+      "description": "官方 PDF 逐字稿，用于核对例题、术语与材料位置。",
+      "href": "https://ocw.mit.edu/courses/18-06-linear-algebra-spring-2010/50702172c7cdc969615b81e6f22499fd_MIT18_06S10_L01.pdf"
+    }
+  ],
+  "attribution": {
+    "text": "示例材料来自 MIT OpenCourseWare，课程内容按 CC BY-NC-SA 4.0 提供。",
+    "license_name": "CC BY-NC-SA 4.0",
+    "license_url": "https://ocw.mit.edu/pages/privacy-and-terms-of-use/"
+  },
+  "workflow": [
+    {
+      "number": "01",
+      "key": "recall",
+      "title": "知识唤醒",
+      "summary": "先闭卷回忆相关知识，再由模型指出遗漏与混淆。",
+      "input_markdown": "- **已有知识**：此前学习过矩阵乘法和二元一次方程组。\n- **核心概念**：我记得 $Ax=b$ 表示矩阵与向量相乘，但容易把矩阵运算和几何图像分开理解。\n- **能讲清楚的部分**：能够代入检验二元方程组的解，也能进行基础消元。\n- **当前卡点**：不清楚行图像、列图像为何描述同一个系统，也误以为方阵一定唯一可解。",
+      "feedback_markdown": "## 1. 回忆准确的部分\n\n- 你把本讲和“矩阵乘法、二元一次方程组”联系起来是准确的：本讲确实从线性方程组出发，并用二元方程组作为入口。[MIT 18.06 Lecture 1 transcript，第1页]\n- 你记得 $Ax=b$ 表示矩阵与向量相乘，这与本讲把方程组写成矩阵形式的方向一致。[MIT OCW Lecture 1 course page，网页正文]\n- 你能代入检验解、做基础消元，这属于求解线性方程组的基本技能，和本讲“solve a system of linear equations”的核心问题相匹配。[MIT 18.06 Lecture 1 transcript，第1页]\n\n## 2. 明显遗漏或混淆的部分\n\n- 目前回顾中还没有明确说出本讲的三个视角：**行图像、列图像、矩阵形式**。材料中强调本讲是用三种方式理解同一个线性方程组：row method、column method、matrix method。[MIT OCW Lecture 1 course page，网页正文]\n- 你已经意识到“容易把矩阵运算和几何图像分开理解”，这是一个关键混淆点。本讲的重点恰恰是把代数式 $Ax=b$ 和几何图像联系起来：\n  - 行图像：一次看一个方程，例如二维中是直线相交；\n  - 列图像：把右端向量 $b$ 看成矩阵列向量的线性组合；\n  - 矩阵形式：用 $Ax=b$ 压缩表达整个方程组。\n- 你的回顾偏向“会算”，但对“同一个解在不同图像中的意义”还没有展开。例如，行图像中解是交点；列图像中解是组合列向量所需的系数。\n\n## 3. 需要回看材料核对的关键点\n\n- 回看 Strang 在第一讲开头如何区分三种图像：row picture 是“一次看一个方程”，column picture 是“一次看一列”，matrix form 是更紧凑的代数表达。[MIT 18.06 Lecture 1 transcript，第1页]\n- 核对 OCW 页面中对三种方法的概括：row method 关注各个方程，column method 关注列的组合，matrix method 用更紧凑有力的方式描述线性方程组。[MIT OCW Lecture 1 course page，网页正文]\n- 特别建议你回看列图像：不要只把 $Ax$ 当作机械矩阵乘法，而要读成“用 $x$ 的分量作为权重，对 $A$ 的列向量做线性组合”。\n\n## 4. 一条简短的后续学习建议\n\n下次复习时，用同一个二元方程组分别画出行图像、写出列向量组合、再写成 $Ax=b$，强迫自己说明“三种表达为什么是同一件事”。"
+    },
+    {
+      "number": "02",
+      "key": "study",
+      "title": "材料学习",
+      "summary": "离开 Web 自主阅读，系统保留本次材料和学习范围。",
+      "input_markdown": "完整学习 MIT OCW Lecture 1 课程页和官方 PDF 逐字稿，重点理解三种视角。",
+      "feedback_markdown": ""
+    },
+    {
+      "number": "03",
+      "key": "reconstruct",
+      "title": "主动重构",
+      "summary": "合上材料，用自己的结构重新讲清问题、概念和推导。",
+      "input_markdown": "- **要解决的问题**：本讲要解决如何从几何、向量组合和矩阵三个层面理解线性方程组。\n- **主要学习内容**：行图像寻找各方程几何对象的公共交点；列图像判断列向量组合是否能得到 $b$；矩阵形式用 $Ax=b$ 统一表达。\n- **数学定义与推导**：对于 $2x-y=0$、$-x+2y=3$，解为 $(1,2)$。一般地，$Ax=b$ 可解当且仅当 $b\\in C(A)$。",
+      "feedback_markdown": "## 1. 逻辑完整且表达清楚的部分\n\n- 你抓住了本讲的主线：**同一个线性方程组可以从几何、列向量组合、矩阵形式三个层面理解**。这与 OCW 页面概括一致：row method 关注单个方程，column method 关注列的组合，matrix method 是更紧凑的表达方式。[MIT OCW Lecture 1 course page，网页正文]\n- 你对三种视角的核心表述基本准确：\n  - **行图像**：寻找各方程对应几何对象的公共交点；\n  - **列图像**：判断 $b$ 是否能由系数矩阵的列向量线性组合得到；\n  - **矩阵形式**：用 $Ax=b$ 统一表达整个方程组。\n- 例子计算正确：\n\n$$\n2x-y=0,\\quad -x+2y=3\n$$\n\n由第一式得 $y=2x$，代入第二式：\n\n$$\n-x+2(2x)=3 \\Rightarrow 3x=3 \\Rightarrow x=1,\\ y=2\n$$\n\n所以解是 $(1,2)$。这个例子正是讲稿第 1 页引入 row picture、column picture 和 matrix form 时使用的二元方程组。[MIT 18.06 Lecture 1 transcript，第 1 页]\n\n## 2. 概念、条件或推导上的缺口\n\n- 你已经说到“列图像判断列向量组合是否能得到 $b$”，但还可以把这个例子具体写出来。该方程组的矩阵形式是：\n\n$$\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix}\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n列图像就是：\n\n$$\nx\\begin{bmatrix}2 \\\\ -1\\end{bmatrix}\n+y\\begin{bmatrix}-1 \\\\ 2\\end{bmatrix}\n=\n\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}\n$$\n\n当 $x=1,y=2$ 时：\n\n$$\n1\\begin{bmatrix}2 \\\\ -1\\end{bmatrix}\n+2\\begin{bmatrix}-1 \\\\ 2\\end{bmatrix}\n=\n\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}\n$$\n\n这一步能把“解是 $(1,2)$”和“列向量如何组合成 $b$”真正连起来。\n\n- 你写的“一般地，$Ax=b$ 可解当且仅当 $b\\in C(A)$”是正确的，但最好补一句条件含义：这里的 $C(A)$ 指 **$A$ 的列空间**，也就是 $A$ 的所有列向量的线性组合构成的集合。于是 $Ax=b$ 可解，等价于 $b$ 能被这些列向量线性组合出来。\n\n## 3. 可能存在的错误或模糊表述\n\n- “几何、向量组合和矩阵三个层面”这个说法总体可以，但建议更贴近本讲术语：**行图像、列图像、矩阵形式**。因为“几何”容易只让人想到行图像中的直线交点，而列图像本身也有几何意义。\n- “行图像寻找各方程几何对象的公共交点”在二维例子中是直线交点；在更高维中则通常是平面或超平面的公共交集。可以避免只把 row picture 固定理解成二维直线。\n- “矩阵形式用 $Ax=b$ 统一表达”还可以更明确：矩阵形式不是第三个不同问题，而是把同一个方程组压缩成一个代数对象，便于后续做消元、讨论可解性和结构。\n\n## 4. 如何进一步讲清楚\n\n你可以按“同一个解的三种含义”来重构：\n\n1. **行图像**：\n   对方程\n   $$\n   2x-y=0,\\quad -x+2y=3\n   $$\n   每个方程是一条直线，解 $(1,2)$ 是两条直线的交点。\n\n2. **列图像**：\n   把系数矩阵的两列看成两个向量：\n   $$\n   \\begin{bmatrix}2 \\\\ -1\\end{bmatrix},\\quad\n   \\begin{bmatrix}-1 \\\\ 2\\end{bmatrix}\n   $$\n   解 $(1,2)$ 的意思是：用第一个列向量取 $1$ 份，第二个列向量取 $2$ 份，正好得到右端向量 $b=\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}$。\n\n3. **矩阵形式**：\n   用\n   $$\n   Ax=b\n   $$\n   同时编码所有方程、所有未知数和右端向量。之后讨论“是否有解”，就可以转化为判断 $b$ 是否在 $A$ 的列空间 $C(A)$ 中。\n\n这样表达后，你的重构会从“知道三种说法”进一步变成“能解释同一个解在三种图像中的不同意义”。"
+    },
+    {
+      "number": "04",
+      "key": "practice",
+      "title": "练习与推导",
+      "summary": "生成 12 道由浅入深的结构化练习，并逐题作答。",
+      "input_markdown": "本次共 12 题，其中 4 道选择题、8 道概念/计算/应用/推导/延伸题。",
+      "feedback_markdown": ""
+    },
+    {
+      "number": "05",
+      "key": "review",
+      "title": "逐题复核",
+      "summary": "每题分别判断正确、部分正确或错误，并给出具体修正思路。",
+      "input_markdown": "10 题正确，2 题错误；错误集中在行列图像混淆和方阵可逆性的过度泛化。",
+      "feedback_markdown": ""
+    },
+    {
+      "number": "06",
+      "key": "preview",
+      "title": "学习收束",
+      "summary": "生成今日摘要与 3 条下次思考问题，并传递到下一次学习记录。",
+      "input_markdown": "## 今日学习摘要\n\n今天已完成 MIT 18.06 第一讲“线性方程的几何图像”的学习、重构、练习与批改，推进到能够用 **行图像、列图像、矩阵形式** 三种方式理解同一个线性方程组。[MIT OCW Lecture 1 course page，网页正文；MIT 18.06 Lecture 1 transcript，第1页]\n\n### 已确认掌握\n- **行图像**：一次看一个方程；二维中是直线公共交点，三维中可推广为平面公共交集。\n- **列图像**：把右端向量 $b$ 看成矩阵 $A$ 的列向量按未知数系数组成的线性组合。\n- **矩阵形式**：用 $Ax=b$ 紧凑表示整个线性方程组。\n- 例题 $2x-y=0$、$-x+2y=3$ 的解为 $(1,2)$，矩阵与列图像表达为：\n\n$$\n\\begin{bmatrix}2&-1\\\\-1&2\\end{bmatrix}\\begin{bmatrix}x\\\\y\\end{bmatrix}=\\begin{bmatrix}0\\\\3\\end{bmatrix},\\quad\nx\\begin{bmatrix}2\\\\-1\\end{bmatrix}+y\\begin{bmatrix}-1\\\\2\\end{bmatrix}=\\begin{bmatrix}0\\\\3\\end{bmatrix}\n$$\n\n- 可解性条件：$Ax=b$ 可解当且仅当 $b\\in C(A)$，其中 $C(A)$ 是所有列向量线性组合的集合。\n\n### 主要修正与错题模式\n- 曾把 **column picture** 误选成 **row picture**，需继续强化“列图像看列向量组合”。\n- 曾把 $Ax=b$ 误理解为行列式计算工具；应理解为方程组的矩阵表达。\n- 曾把 $b\\in C(A)$ 误解为 $b$ 等于某一列；正确是 $b$ 属于列向量张成的空间。\n- 曾误认为方阵必然可逆、任意 $b$ 都唯一可解；需先判断列向量是否线性无关、是否张成目标空间。\n\n### 下一次衔接\n重点复习：同一个解在行图像、列图像、矩阵形式中的不同含义；继续练习列空间判断；预习三维中三个平面的交集如何对应无解、唯一解或无穷多解。",
+      "feedback_markdown": ""
+    }
+  ],
+  "exercise": {
+    "items": [
+      {
+        "position": 1,
+        "item_type": "single_choice",
+        "difficulty": "basic",
+        "stem_markdown": "在本讲的语境中，哪一项最准确描述 **row picture（行图像）**？",
+        "options": [
+          {
+            "id": "A",
+            "label": "一次关注一个方程，把每个方程看成几何对象，并寻找它们的公共部分"
+          },
+          {
+            "id": "B",
+            "label": "一次关注一个未知数，把未知数依次代入矩阵中"
+          },
+          {
+            "id": "C",
+            "label": "一次关注矩阵的一列，把右端向量写成列向量组合"
+          },
+          {
+            "id": "D",
+            "label": "只把线性方程组写成 $Ax=b$，不关心几何含义"
+          }
+        ],
+        "source_refs": [
+          "MIT 18.06 Lecture 1 transcript · 第 1 页",
+          "MIT OCW Lecture 1 course page · 网页正文"
+        ],
+        "response": {
+          "answer_markdown": "",
+          "selected_options": [
+            "A"
+          ],
+          "verdict": "correct",
+          "feedback_markdown": "正确。A 准确对应 **row picture（行图像）**：一次看一个方程，把方程看成几何对象，并寻找公共部分。"
+        }
+      },
+      {
+        "position": 2,
+        "item_type": "single_choice",
+        "difficulty": "basic",
+        "stem_markdown": "在本讲的语境中，哪一项最准确描述 **column picture（列图像）**？",
+        "options": [
+          {
+            "id": "A",
+            "label": "把每个方程分别画成直线或平面"
+          },
+          {
+            "id": "B",
+            "label": "把右端向量 $b$ 看成系数矩阵列向量的线性组合"
+          },
+          {
+            "id": "C",
+            "label": "把所有未知数都消去，只保留常数项"
+          },
+          {
+            "id": "D",
+            "label": "把矩阵 $A$ 看成一个没有几何意义的数字表"
+          }
+        ],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文",
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "",
+          "selected_options": [
+            "A"
+          ],
+          "verdict": "incorrect",
+          "feedback_markdown": "错误。你选的 A 描述的是 **行图像**，不是 **列图像**。\n\n正确思路：列图像关注矩阵的列，把右端向量 $b$ 看成系数矩阵 $A$ 的列向量按未知数系数组合得到的结果。因此本题应选 B。[MIT OCW Lecture 1 course page，网页正文]"
+        }
+      },
+      {
+        "position": 3,
+        "item_type": "single_choice",
+        "difficulty": "basic",
+        "stem_markdown": "下列哪一项最准确说明矩阵形式 $Ax=b$ 在本讲中的作用？",
+        "options": [
+          {
+            "id": "A",
+            "label": "它只是为了更快计算行列式"
+          },
+          {
+            "id": "B",
+            "label": "它用一个紧凑形式表达整个线性方程组"
+          },
+          {
+            "id": "C",
+            "label": "它只适用于两个未知数的方程组"
+          },
+          {
+            "id": "D",
+            "label": "它会消除行图像和列图像之间的联系"
+          }
+        ],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文",
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "",
+          "selected_options": [
+            "B"
+          ],
+          "verdict": "correct",
+          "feedback_markdown": "正确。$Ax=b$ 在本讲中是对整个线性方程组的紧凑统一表达，而不是单纯为了计算行列式。"
+        }
+      },
+      {
+        "position": 4,
+        "item_type": "single_choice",
+        "difficulty": "intermediate",
+        "stem_markdown": "对于线性方程组 $Ax=b$，下列哪一项最准确表达“$Ax=b$ 可解”的列空间条件？",
+        "options": [
+          {
+            "id": "A",
+            "label": "$b$ 必须等于 $A$ 的某一列"
+          },
+          {
+            "id": "B",
+            "label": "$b$ 必须在 $A$ 的列空间 $C(A)$ 中"
+          },
+          {
+            "id": "C",
+            "label": "$A$ 的每一列都必须等于 $b$"
+          },
+          {
+            "id": "D",
+            "label": "$A$ 必须是 $1\\times 1$ 矩阵"
+          }
+        ],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文"
+        ],
+        "response": {
+          "answer_markdown": "",
+          "selected_options": [
+            "B"
+          ],
+          "verdict": "correct",
+          "feedback_markdown": "正确。$Ax=b$ 可解的列空间条件是 $b\\in C(A)$，也就是 $b$ 能由 $A$ 的列向量线性组合得到。"
+        }
+      },
+      {
+        "position": 5,
+        "item_type": "short_answer",
+        "difficulty": "basic",
+        "stem_markdown": "用自己的话分别说明：行图像、列图像、矩阵形式各自是在看线性方程组的什么。",
+        "options": [],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文",
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "参考答案：\n\n- 行图像：一次看一个方程，把每个方程看成直线、平面或更高维超平面，解是这些几何对象的公共部分。\n- 列图像：一次看矩阵的一列，把 $b$ 看成 $A$ 的列向量按未知数系数组合出来的结果。\n- 矩阵形式：用 $Ax=b$ 紧凑表示整个线性方程组。",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。你分别说明了行图像、列图像和矩阵形式的关注点，尤其准确区分了“公共交集”和“列向量线性组合”。"
+        }
+      },
+      {
+        "position": 6,
+        "item_type": "calculation",
+        "difficulty": "basic",
+        "stem_markdown": "求解方程组：\n\n$$\n2x-y=0,\\quad -x+2y=3\n$$\n\n并写出解向量。",
+        "options": [],
+        "source_refs": [
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "由 $2x-y=0$ 得 $y=2x$。代入 $-x+2y=3$，得：\n\n$$\n-x+2(2x)=3\n$$\n\n所以 $3x=3$，$x=1$，进而 $y=2$。\n\n解向量为：\n\n$$\n\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}\n$$",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。计算过程和解向量都正确：$x=1,y=2$，解向量为 $\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}$。"
+        }
+      },
+      {
+        "position": 7,
+        "item_type": "application",
+        "difficulty": "intermediate",
+        "stem_markdown": "把下面方程组写成矩阵形式 $Ax=b$：\n\n$$\n2x-y=0,\\quad -x+2y=3\n$$",
+        "options": [],
+        "source_refs": [
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "矩阵形式为：\n\n$$\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix}\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n其中：\n\n$$\nA=\\begin{bmatrix}2 & -1 \\\\ -1 & 2\\end{bmatrix},\\quad\nx=\\begin{bmatrix}x \\\\ y\\end{bmatrix},\\quad\nb=\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}\n$$",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。系数矩阵 $A$、未知向量和右端向量 $b$ 都写对了。"
+        }
+      },
+      {
+        "position": 8,
+        "item_type": "application",
+        "difficulty": "intermediate",
+        "stem_markdown": "对方程组\n\n$$\n2x-y=0,\\quad -x+2y=3\n$$\n\n写出它的列图像表达式。",
+        "options": [],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文",
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "该方程组的系数矩阵列向量为：\n\n$$\n\\begin{bmatrix}2 \\\\ -1\\end{bmatrix},\\quad\n\\begin{bmatrix}-1 \\\\ 2\\end{bmatrix}\n$$\n\n所以列图像表达式为：\n\n$$\nx\\begin{bmatrix}2 \\\\ -1\\end{bmatrix}\n+y\\begin{bmatrix}-1 \\\\ 2\\end{bmatrix}\n=\n\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}\n$$",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。你正确识别了两个列向量，并写出了列图像表达式：\n\n$$\nx\\begin{bmatrix}2 \\\\ -1\\end{bmatrix}+y\\begin{bmatrix}-1 \\\\ 2\\end{bmatrix}=\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}\n$$"
+        }
+      },
+      {
+        "position": 9,
+        "item_type": "calculation",
+        "difficulty": "intermediate",
+        "stem_markdown": "验证向量\n\n$$\n\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}\n$$\n\n是否满足矩阵方程\n\n$$\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix}\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$",
+        "options": [],
+        "source_refs": [
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "代入 $x=1,y=2$：\n\n$$\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix}\n\\begin{bmatrix}\n1 \\\\\n2\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n2\\cdot 1+(-1)\\cdot 2 \\\\\n(-1)\\cdot 1+2\\cdot 2\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n因此该向量满足矩阵方程。",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。你通过矩阵向量乘法验证了 $\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}$ 的确给出右端向量 $\\begin{bmatrix}0 \\\\ 3\\end{bmatrix}$。"
+        }
+      },
+      {
+        "position": 10,
+        "item_type": "derivation",
+        "difficulty": "intermediate",
+        "stem_markdown": "设\n\n$$\nA=\\begin{bmatrix}\n1 & 2 \\\\\n3 & 6\n\\end{bmatrix}\n$$\n\n从列图像角度分析：哪些形如 $b=\\begin{bmatrix}b_1 \\\\ b_2\\end{bmatrix}$ 的右端向量能使 $Ax=b$ 有解？",
+        "options": [],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文"
+        ],
+        "response": {
+          "answer_markdown": "因为 $A$ 是方阵，所以它的列向量一定线性无关，任意 $b$ 都能写成这些列向量的唯一线性组合。",
+          "selected_options": [],
+          "verdict": "incorrect",
+          "feedback_markdown": "错误。关键问题是：**方阵不一定可逆，方阵的列向量也不一定线性无关**。\n\n这里\n\n$$\nA=\\begin{bmatrix}1 & 2 \\\\ 3 & 6\\end{bmatrix}\n$$\n\n两列为\n\n$$\n\\begin{bmatrix}1 \\\\ 3\\end{bmatrix},\\quad \\begin{bmatrix}2 \\\\ 6\\end{bmatrix}\n$$\n\n第二列是第一列的 $2$ 倍，所以列空间只是一条直线：\n\n$$\nC(A)=\\operatorname{span}\\left\\{\\begin{bmatrix}1 \\\\ 3\\end{bmatrix}\\right\\}\n$$\n\n因此不是任意 $b$ 都可解，而是必须满足\n\n$$\nb=t\\begin{bmatrix}1 \\\\ 3\\end{bmatrix}\n$$\n\n等价于\n\n$$\nb_2=3b_1\n$$"
+        }
+      },
+      {
+        "position": 11,
+        "item_type": "application",
+        "difficulty": "challenge",
+        "stem_markdown": "对下面三元线性方程组，分别用一句话描述它的行图像、列图像和矩阵形式各自关注什么：\n\n$$\n\\begin{aligned}\nx+y+z&=1\\\\\n2x-y+z&=0\\\\\nx+3y-z&=4\n\\end{aligned}\n$$",
+        "options": [],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文",
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "参考答案：\n\n- 行图像：每个方程在三维空间中对应一个平面，求解方程组就是寻找三个平面的公共点或公共交集。\n- 列图像：将右端向量 $\\begin{bmatrix}1 \\\\ 0 \\\\ 4\\end{bmatrix}$ 看作三个系数列向量的线性组合。\n- 矩阵形式：将整个方程组写成\n\n$$\n\\begin{bmatrix}\n1 & 1 & 1 \\\\\n2 & -1 & 1 \\\\\n1 & 3 & -1\n\\end{bmatrix}\n\\begin{bmatrix}\nx \\\\\ny \\\\\nz\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n1 \\\\\n0 \\\\\n4\n\\end{bmatrix}\n$$",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。你能把二维行图像推广到三维平面，并且正确写出了列图像关注右端向量的列向量组合，以及矩阵形式。"
+        }
+      },
+      {
+        "position": 12,
+        "item_type": "extension",
+        "difficulty": "challenge",
+        "stem_markdown": "比较“先求解方程组再解释几何意义”和“先用行图像、列图像理解方程组再求解”这两种学习方式。结合本讲内容，说明哪一种更有助于理解 $Ax=b$，并给出理由。",
+        "options": [],
+        "source_refs": [
+          "MIT OCW Lecture 1 course page · 网页正文",
+          "MIT 18.06 Lecture 1 transcript · 第 1 页"
+        ],
+        "response": {
+          "answer_markdown": "参考答案：\n\n更推荐先建立行图像、列图像和矩阵形式之间的联系，再进行求解。理由是：本讲不是只训练代数求解，而是强调用三种方式理解同一个线性方程组。行图像说明解是方程对应几何对象的公共部分；列图像说明解给出组合矩阵列向量得到 $b$ 的系数；矩阵形式 $Ax=b$ 则把这些信息压缩成统一表达。这样学习能避免把矩阵乘法当成纯计算，也能帮助理解可解性条件 $b\\in C(A)$。",
+          "selected_options": [],
+          "verdict": "correct",
+          "feedback_markdown": "正确。你的回答抓住了本讲重点：不是只求解，而是建立行图像、列图像和矩阵形式之间的联系，从而理解 $Ax=b$ 的代数与几何意义。[MIT OCW Lecture 1 course page，网页正文]"
+        }
+      }
+    ]
+  },
+  "preview_questions": [
+    "如果同一个线性方程组已经写成 $Ax=b$，你如何分别用“行图像”和“列图像”解释同一个解向量 $x$ 的含义？",
+    "为什么 $Ax=b$ 可解的条件是 $b\u001b\\in C(A)$，而不是“$b$ 等于 $A$ 的某一列”？请尝试用一个二维例子说明。",
+    "对于三元线性方程组，三个平面的公共交集可能有哪些情况？这些情况分别如何对应无解、唯一解或无穷多解？"
+  ],
+  "note_markdown": "# 第一讲：线性方程的几何图像\n\n> [!abstract] 核心概要\n> 线性代数的一个核心问题是**求解线性方程组**。本讲的重点不仅在于求解方程，更在于通过三种互相联系的视角来理解同一个方程组：**行图像 (Row Picture)**、**列图像 (Column Picture)** 和**矩阵形式 (Matrix Form)**。\n> - **行方法**：关注单个方程的几何约束。\n> - **列方法**：关注列向量的线性组合。\n> - **矩阵方法**：以更紧凑、更有力的方式描述线性方程组。\n> \n> 本讲从一个二元一次方程组出发引入这些概念：\n> $$\n> \\begin{cases}\n> 2x-y=0 \\\\\n> -x+2y=3\n> \\end{cases}\n> $$\n> Gilbert Strang 教授在讲稿开头指出，线性代数的基本问题即为求解线性方程组，并正是以此例引入了 row picture、column picture 和 matrix form。\n> \n> *参考来源：[MIT OCW Lecture 1 course page，网页正文]、[MIT 18.06 Lecture 1 transcript，第 1 页]*\n\n---\n\n## 1. 同一个线性方程组的三个视角\n\n对于同一个线性方程组，我们可以从以下三个维度进行理解：\n\n1. **行图像 (Row Picture)**：一次观察一个方程。\n2. **列图像 (Column Picture)**：一次观察矩阵的一列，将右端向量视为列向量的线性组合。\n3. **矩阵形式 (Matrix Form)**：使用关系式 $Ax=b$ 紧凑地表示整个方程组。\n\n这三个视角并非代表三个独立的问题，而是同一个几何与代数实体的三种不同表达方式。它们都在回答同一个核心问题：未知数 $x, y$（或更一般的未知向量 $x$）应该取什么值，才能使该方程组同时成立？\n\n---\n\n## 2. 行图像：一次观察一个方程\n\n### 2.1 二维空间中的行图像\n\n在二元一次方程组中，每一个方程都可以看作平面上的一条直线。对于以下示例：\n\n$$2x-y=0$$\n\n与\n\n$$-x+2y=3$$\n\n它们各代表一条直线。\n\n行图像的核心思路是：**分别画出每一个方程对应的几何对象，然后寻找它们的公共交点**。\n\n> [!example] 求解二元一次方程组示例\n> 考虑方程组：\n> $$\n> \\begin{cases}\n> 2x-y=0 \\\\\n> -x+2y=3\n> \\end{cases}\n> $$\n> **消元求解过程**：\n> 1. 由第一个方程可得：\n>    $$y=2x$$\n> 2. 将其代入第二个方程：\n>    $$-x+2(2x)=3$$\n> 3. 化简得到：\n>    $$3x=3 \\implies x=1$$\n> 4. 代回求得：\n>    $$y=2$$\n> \n> 因此，方程组的解为：\n> $$(x,y)=(1,2)$$\n> \n> 在行图像中，解 $(1,2)$ 的几何意义是**两条直线的公共交点**。换言之，该点同时满足两个方程的约束。\n\n### 2.2 行图像的几何推广\n\n行图像对应的几何对象维度随空间维度增加而推广：\n- 在**二维空间**中，一个线性方程通常对应一条**直线**。\n- 在**三维空间**中，一个线性方程通常对应一个**平面**。\n- 更一般地，在 **$n$ 维空间**中，一个线性方程对应一个**超平面**。\n\n因此，行图像的核心视角是：\n> 每一行代表一个方程的几何约束；方程组的解则是所有方程对应几何对象的**公共交集**。\n\n> [!warning] 约束交集与唯一解的条件\n> 需要特别注意，多个几何对象在空间中不一定总能交于唯一的点。例如在三维空间中，三个平面相交的情况可能包括：\n> - **交于一个点**：对应方程组有**唯一解**。\n> - **没有公共交集**（例如三个平面两两相交但无共同交点，或存在平行平面）：对应方程组**无解**。\n> - **交于一条直线或重合于一个平面**：对应方程组有**无穷多解**。\n> \n> 因此，不能简单地认为“只要有三个方程和三个未知数，就必定存在唯一解”。方程组是否唯一可解，取决于方程之间是否**独立**、系数矩阵是否**可逆**等深层条件。\n\n---\n\n## 3. 列图像：将右端向量视为列向量的线性组合\n\n### 3.1 从方程组到列向量的组合\n\n我们以同一个方程组为例：\n\n$$\n\\begin{cases}\n2x-y=0 \\\\\n-x+2y=3\n\\end{cases}\n$$\n\n可以将其改写为以下矩阵乘积形式：\n\n$$\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix}\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n定义其各组成部分为：\n\n$$\nA=\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix},\n\\quad\nx_{\\text{vec}}=\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix},\n\\quad\nb=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n*(注：为避免未知数 $x$ 与整体向量混淆，此处将未知向量暂记为 $x_{\\text{vec}}$。通常教材会直接写作 $x$，即简写为 $Ax=b$)*。\n\n如果将矩阵乘法按照系数矩阵的**列**进行展开，上述式子就等价于：\n\n$$\nx\n\\begin{bmatrix}\n2 \\\\\n-1\n\\end{bmatrix}\n+y\n\\begin{bmatrix}\n-1 \\\\\n2\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n这便是方程组的**列图像**表达。\n\n### 3.2 解在列图像中的几何与代数意义\n\n将前面计算所得的解 $(x,y)=(1,2)$ 代回列图像的线性组合表达式中：\n\n$$\n1\n\\begin{bmatrix}\n2 \\\\\n-1\n\\end{bmatrix}\n+2\n\\begin{bmatrix}\n-1 \\\\\n2\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n2 \\\\\n-1\n\\end{bmatrix}\n+\n\\begin{bmatrix}\n-2 \\\\\n4\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n由此可见，在列图像中，解 $(1,2)$ 的核心意义不再是“几何图形的交点坐标”，而是：\n> **列向量的线性组合系数**：即取 $1$ 份的矩阵第一列向量与 $2$ 份的第二列向量，二者求和恰好能够拼凑出右端的目标向量 $b$。\n\n这揭示了列图像与行图像之间的本质差异：\n- **行图像**：侧重于寻找**“哪些点能够同时满足所有单方程的约束条件”**。\n- **列图像**：侧重于寻找**“需要使用怎样的组合系数，才能让矩阵的各列向量组合出目标向量 $b$”**。\n\n### 3.3 列空间与方程组的可解性条件\n\n我们将矩阵 $A$ 的所有列向量的线性组合构成的集合称为矩阵 $A$ 的**列空间**，记作 $C(A)$。\n\n若将矩阵 $A$ 按列拆分表示为：\n\n$$\nA=\n\\begin{bmatrix}\n| & | & & | \\\\\na_1 & a_2 & \\cdots & a_n \\\\\n| & | & & |\n\\end{bmatrix}\n$$\n\n则其列空间定义为：\n\n$$\nC(A)=\\{c_1a_1+c_2a_2+\\cdots+c_na_n \\mid c_1,c_2,\\ldots,c_n \\text{ 为标量}\\}\n$$\n\n因此，线性方程组 $Ax=b$ 的**可解性**可以由列空间给出明确的判定：方程组可解，当且仅当右端向量 $b$ 能由 $A$ 的列向量线性组合得到。即：\n\n$$\nAx=b \\text{ 可解} \\Longleftrightarrow b\\in C(A)\n$$\n\n> [!warning] 关于成员关系 $b \\in C(A)$ 的易混淆点\n> 必须指出，$b \\in C(A)$ 并不是要求右端向量 $b$ 必须与矩阵 $A$ 中的某一个特定列相等，而是指它必须落在 $A$ 的列向量所能生成的**线性组合空间**中。\n> \n> 例如在本文的示例中：\n> $$\n> b=\\begin{bmatrix}\n> 0 \\\\\n> 3\n> \\end{bmatrix}\n> $$\n> 虽然它不等于矩阵 $A$ 的第一列 $\\begin{bmatrix} 2 \\\\ -1 \\end{bmatrix}$，也不等于第二列 $\\begin{bmatrix} -1 \\\\ 2 \\end{bmatrix}$，但由于它可以表示为两列的线性组合：\n> $$\n> \\begin{bmatrix}\n> 0 \\\\\n> 3\n> \\end{bmatrix}\n> =\n> 1\n> \\begin{bmatrix}\n> 2 \\\\\n> -1\n> \\end{bmatrix}\n> +2\n> \\begin{bmatrix}\n> -1 \\\\\n> 2\n> \\end{bmatrix}\n> $$\n> 因此它属于列空间 $C(A)$，这也确保了该方程组可解。\n\n---\n\n## 4. 矩阵形式：用 $Ax=b$ 统一表达方程组\n\n矩阵形式将整个线性方程组压缩表达为紧凑的代数方程：\n\n$$\nAx=b\n$$\n\n各部分组件的定义与角色如下：\n- **$A$ (系数矩阵)**：用于存储方程组中所有未知数前面的系数。\n- **$x$ (未知向量)**：用于存储方程组中的所有未知数。\n- **$b$ (右端向量)**：用于存储方程右侧的常数项。\n\n在本讲的二元一次方程组示例中，其对应的矩阵形式为：\n\n$$\nA=\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix},\n\\quad\nx=\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix},\n\\quad\nb=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n组合起来即为：\n\n$$\n\\begin{bmatrix}\n2 & -1 \\\\\n-1 & 2\n\\end{bmatrix}\n\\begin{bmatrix}\nx \\\\\ny\n\\end{bmatrix}\n=\n\\begin{bmatrix}\n0 \\\\\n3\n\\end{bmatrix}\n$$\n\n> [!info] 矩阵形式的整合作用\n> 矩阵形式的价值远不止于简写或便于代数运算，它将**行图像**与**列图像**完美地统一在了同一个表达式中：\n> - **按行观察**：$Ax=b$ 表达了矩阵的每一行向量与未知向量 $x$ 做内积，分别得到对应方程右端的常数值。\n> - **按列观察**：$Ax=b$ 表达了以未知向量 $x$ 的各分量为系数，对矩阵 $A$ 的列向量进行线性组合，以生成右端向量 $b$。\n> \n> 综上所述，矩阵方程 $Ax=b$ 同时编码并融合了以下关键信息：\n> 1. 线性方程组自身的代数结构；\n> 2. 每个方程对未知数施加的行约束；\n> 3. 列向量组合生成右端目标向量的代数机制；\n> 4. 解向量在行图像和列图像中的多重数学内涵。\n\n---\n\n## 5. 方阵、可逆性与唯一解的边界\n\n本讲首先针对最经典的“方程数等于未知数个数”的情形（即 $n$ 个方程、$n$ 个未知数）展开探讨。[MIT 18.06 Lecture 1 transcript，第 1 页]\n\n然而，需要厘清的核心边界是：\n> **方阵并不等同于一定可逆，也不代表对任意的右端向量 $b$ 都必然存在唯一解。**\n\n对于 $n \\times n$ 的方阵 $A$，求解状况主要由其**可逆性**决定：\n- **当方阵 $A$ 可逆时**：对于任意的右端向量 $b$，方程组 $Ax=b$ 必定存在唯一解，在代数上可以直接表达为：\n  $$\n  x=A^{-1}b\n  $$\n- **当方阵 $A$ 不可逆（奇异）时**：系统的求解情况会发生退化，可能表现为：\n  - 针对某些 $b$ 表现为**无解**；\n  - 针对另外一些 $b$ 表现为**有无穷多解**；\n  - 此时方程组**不可能**对所有 $b$ 都存在唯一解。\n\n从**列图像**的视角来解释这种空间张成关系：\n方阵 $A$ 能够对任意 $b$ 均有解，在几何上意味着 $A$ 的列向量能够张成 (Span) 整个 $n$ 维目标空间。\n- **二维空间示例**：两个列向量若**不共线**，即可张成整个二维平面，能够通过线性组合生成平面上的任意向量 $b$；若两列向量**共线**，则只能张成一条直线，平面上大部分的 $b$ 均无法被组合生成（无解），而位于该直线上的 $b$ 则可通过无穷多种系数进行组合（无穷多解）。\n\n---\n\n## 6. 三种视角之间的对应关系\n\n为了更直观地理解三种视角之间的内在联系，现将它们整理为对比表格：\n\n| 视角 | 核心观察对象 | 解的物理/几何含义 | 本讲示例中的具体解释 |\n| :--- | :--- | :--- | :--- |\n| **行图像** | 一个方程（矩阵的一行） | 所有方程几何约束在空间中的**公共交集** | 二维平面上两条直线的交点坐标为 $(1,2)$。 |\n| **列图像** | 矩阵的各列向量 | 组合出右端向量 $b$ 所需的**线性组合系数** | 取 $1$ 份第一列加上 $2$ 份第二列，正好凑出 $b$。 |\n| **矩阵形式** | 代数式 $Ax=b$ | 用统一而简练的数学符号表达整个系统 | 表达为矩阵与未知向量的乘积：$A\\begin{bmatrix}x \\\\ y\\end{bmatrix}=b$。 |\n\n三者之间的核心连接纽带是矩阵方程：\n\n$$\nAx=b\n$$\n\n该式既可以**按行拆解**，理解为多个单方程的几何约束同时得到满足；也可以**按列展开**，理解为各列向量以未知数分量为系数进行线性组合以逼近/等于目标向量 $b$。\n\n---\n\n## 7. 本讲的核心理解\n\n学习线性方程组时，绝不能仅满足于“代入消元、计算出结果”这一动作。本讲真正为我们建立的是一种多维度的结构化观察方式：\n- **行图像**：将解看作满足空间中所有方程几何约束的**公共交点**。\n- **列图像**：将解看作对列向量进行线性组合以生成目标向量 $b$ 的**组合系数**。\n- **矩阵形式**：将解看作使得代数关系式 $Ax=b$ 整体成立的**未知向量**。\n\n针对本讲探讨的经典示例：\n\n$$\n\\begin{cases}\n2x-y=0 \\\\\n-x+2y=3\n\\end{cases}\n\\quad \\implies \\text{求解结果为：} \\quad (x,y)=(1,2)\n$$\n\n该解对应以下三种等价但关注点迥异的几何与代数内涵：\n1. **在行图像中**：点 $(1,2)$ 是平面上两条直线的交点。\n2. **在列图像中**：数对 $(1,2)$ 表示取第一列 $1$ 份、第二列 $2$ 份并求和，以拼凑出右端向量 $b$。\n3. **在矩阵形式中**：列向量 $\\begin{bmatrix}1 \\\\ 2\\end{bmatrix}$ 是使矩阵乘法 $Ax=b$ 成立的解向量。\n\n---\n\n## 8. 拓展理解：为什么列图像特别重要\n\n列图像的根本意义在于将传统代数中的“求解方程组”问题，重塑为更具空间直觉的**“向量能否被生成”**（即向量是否包含在特定空间的生成集内）的几何问题。这一核心思想将贯穿整个线性代数课程。\n\n对于任意给定的 $m \\times n$ 一般矩阵：\n\n$$\nA=\n\\begin{bmatrix}\n| & | & & | \\\\\na_1 & a_2 & \\cdots & a_n \\\\\n| & | & & |\n\\end{bmatrix}\n$$\n\n矩阵方程：\n\n$$\nAx=b\n$$\n\n可以直接以列向量线性组合的形式等价地展开为：\n\n$$\nx_1a_1+x_2a_2+\\cdots+x_na_n=b\n$$\n\n因此，求解方程组 $Ax=b$ 的物理本质其实是在探讨：\n> **核心问题**：是否存在一组标量系数 $\\{x_1, x_2, \\ldots, x_n\\}$，使得矩阵 $A$ 的各列向量在线性组合后，能够精确地拼凑出右端的常数向量 $b$？\n\n- 如果这组组合系数**存在**，则表明方程组**可解**；\n- 如果这组组合系数**不存在**，则方程组**无解**。\n\n这一列组合的视角在后续的学习中，将自然地与**主元 (Pivots)**、**秩 (Rank)**、**列空间 (Column Space)**、**零空间 (Nullspace)**、**线性无关 (Linear Independence)** 和**可逆矩阵 (Invertibility)** 等高级代数概念紧密相连。\n\n---\n\n## 9. 常见误区与易错点\n\n在学习线性方程组时，读者极易在以下五个关键认知上产生混淆或误用：\n\n1. **混淆行图像与列图像的切入视角**\n   - **辨析**：行图像的核心在于审视各方程所对应的几何对象的**公共交集**；而列图像则着眼于矩阵的各列向量经过怎样的线性组合来**构建右端向量 $b$**。\n2. **孤立地将矩阵方程 $Ax=b$ 视作纯粹的代数乘法符号**\n   - **辨析**：$Ax=b$ 并非仅是一个形式化的计算公式，它是一套能同时表征“联立方程组”、“多维行空间约束”和“列向量线性重构”的多义统一语言。\n3. **曲解向量与列空间关系 $b \\in C(A)$ 的数学含义**\n   - **辨析**：$b \\in C(A)$ 绝非指代向量 $b$ 必须与矩阵 $A$ 中的某一个特定列相等，而是指它可以通过 $A$ 的列向量进行**线性组合**而得到。\n4. **盲目认为方阵（方程数等于未知数个数）必然有唯一解**\n   - **辨析**：方阵仅表示行数与列数相等。该系统只有在系数矩阵 $A$ **可逆**的前提下，才对任意给定的 $b$ 拥有唯一解。\n5. **机械地认为三维空间中的三个平面必定会交于唯一的一点**\n   - **辨析**：三个平面在三维空间中的位置关系具有多样性，它们可能没有公共交点（无解），可能交于一条直线或平面（无穷多解），唯一交点只是其中最理想的一种状态。",
+  "quality": {
+    "materials": 2,
+    "questions": 12,
+    "choice_questions": 4,
+    "correct": 10,
+    "incorrect": 2,
+    "source_references": 11,
+    "cross_day_handoff": true
+  }
+}

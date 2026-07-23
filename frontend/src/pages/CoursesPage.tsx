@@ -1,14 +1,16 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, BookMarked, BookOpen, Plus, Search } from 'lucide-react'
+import { ArrowRight, BookMarked, BookOpen, Plus, Search, Trash2 } from 'lucide-react'
 import { flushSync } from 'react-dom'
 import { Link, useLoaderData, useNavigate } from 'react-router-dom'
 import { api } from '../api'
 import type { CourseSummary } from '../api'
 import { AppDialog } from '../components/AppDialog'
 import { DraftStatus } from '../components/DraftStatus'
+import { TwoStepDeleteDialog } from '../components/TwoStepDeleteDialog'
 import { UnsavedChangesGuard } from '../components/UnsavedChangesGuard'
 import { clearDraft, readDraft, writeDraft } from '../draftStorage'
+import { dismissBundledExample, isBundledExampleVisible } from '../examplePreference'
 import type { CoursesRouteData } from '../routeData'
 
 interface CourseDraft {
@@ -24,12 +26,18 @@ export function CoursesPage() {
   const routeData = useLoaderData() as CoursesRouteData
   const [courses, setCourses] = useState<CourseSummary[]>(routeData.courses)
   const error = routeData.error
+  const [welcomeOpen, setWelcomeOpen] = useState(routeData.onboardingPending)
+  const [welcomeBusy, setWelcomeBusy] = useState(false)
+  const [welcomeError, setWelcomeError] = useState('')
   const [query, setQuery] = useState('')
   const [submitting, setSubmitting] = useState(false)
   const [restoredCreateDraft] = useState<CourseDraft | null>(() => readDraft(createCourseDraftKey, emptyCourseDraft))
   const [createDraft, setCreateDraft] = useState<CourseDraft>(restoredCreateDraft ?? emptyCourseDraft)
   const [createOpen, setCreateOpen] = useState(restoredCreateDraft !== null)
   const [createError, setCreateError] = useState('')
+  const [exampleVisible, setExampleVisible] = useState(isBundledExampleVisible)
+  const [exampleDeleteOpen, setExampleDeleteOpen] = useState(false)
+  const exampleDeleteButton = useRef<HTMLButtonElement | null>(null)
   const navigate = useNavigate()
   const createDirty = JSON.stringify(createDraft) !== JSON.stringify(emptyCourseDraft)
 
@@ -37,6 +45,19 @@ export function CoursesPage() {
     if (createDirty) writeDraft(createCourseDraftKey, emptyCourseDraft, createDraft)
     else clearDraft(createCourseDraftKey)
   }, [createDraft, createDirty])
+
+  async function completeOnboarding() {
+    setWelcomeBusy(true)
+    setWelcomeError('')
+    try {
+      await api.completeOnboarding()
+      setWelcomeOpen(false)
+    } catch (requestError) {
+      setWelcomeError(requestError instanceof Error ? requestError.message : '暂时无法开始使用')
+    } finally {
+      setWelcomeBusy(false)
+    }
+  }
 
   async function handleCreate(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -64,6 +85,9 @@ export function CoursesPage() {
           total_sections: 0,
           completed_sections: 0,
           in_progress_sections: 0,
+          course_state: 'not_started',
+          last_study_at: null,
+          created_at: new Date().toISOString(),
         }, ...current])
         setCreateDraft(emptyCourseDraft)
         setCreateOpen(false)
@@ -93,6 +117,36 @@ export function CoursesPage() {
         || course.learning_goal.toLocaleLowerCase().includes(normalizedQuery)
       ))
     : courses
+  const unfinishedCourses = filteredCourses.filter((course) => course.course_state !== 'completed')
+  const completedCourses = filteredCourses.filter((course) => course.course_state === 'completed')
+
+  function courseActivityLabel(course: CourseSummary) {
+    if (course.course_state === 'completed') return '已完成'
+    if (!course.last_study_at) return '尚未开始'
+    return `最近学习 ${new Intl.DateTimeFormat('zh-CN', { month: 'numeric', day: 'numeric' }).format(new Date(course.last_study_at))}`
+  }
+
+  function courseRow(course: CourseSummary) {
+    const progress = course.total_sections === 0
+      ? 0
+      : Math.round((course.completed_sections / course.total_sections) * 100)
+    return (
+      <Link className="course-item" to={`/courses/${course.id}`} key={course.id}>
+        <div className="course-item__content">
+          <div className="course-item__title-row"><h3>{course.name}</h3><span>{courseActivityLabel(course)}</span></div>
+          <p>{course.description || course.learning_goal || '尚未填写课程描述'}</p>
+          <div className="course-item__progress">
+            <span>已完成 {course.completed_sections}/{course.total_sections} 个小节</span>
+            {course.in_progress_sections > 0 && <span>{course.in_progress_sections} 个进行中</span>}
+          </div>
+          <div className="progress-track progress-track--compact" aria-label={`已完成 ${course.completed_sections} 个，共 ${course.total_sections} 个小节`}>
+            <span style={{ width: `${progress}%` }} />
+          </div>
+        </div>
+        <ArrowRight size={18} aria-hidden="true" />
+      </Link>
+    )
+  }
 
   return (
     <main className="content content--workspace">
@@ -105,6 +159,9 @@ export function CoursesPage() {
       </header>
 
       {error && <p className="error-banner" role="alert">{error}</p>}
+      {routeData.onboardingError && (
+        <p className="error-banner" role="alert">{routeData.onboardingError}</p>
+      )}
 
       <section className="course-list" aria-labelledby="course-list-title">
           <div className="course-toolbar">
@@ -114,10 +171,6 @@ export function CoursesPage() {
               <span className="count-label">共 {courses.length} 门</span>
             </div>
             <div className="course-toolbar__actions">
-              <Link className="secondary-button" to="/example">
-                <BookMarked size={16} aria-hidden="true" />
-                查看示例
-              </Link>
               <label className="course-search">
                 <Search size={16} aria-hidden="true" />
                 <span className="sr-only">搜索课程</span>
@@ -134,7 +187,7 @@ export function CoursesPage() {
               </button>
             </div>
           </div>
-          {courses.length === 0 && !error && (
+          {courses.length === 0 && !exampleVisible && !error && (
             <div className="empty-state">
               <BookOpen size={22} aria-hidden="true" />
               <p>还没有课程</p>
@@ -142,7 +195,6 @@ export function CoursesPage() {
                 <Plus size={16} aria-hidden="true" />
                 创建第一门课程
               </button>
-              <Link className="text-button" to="/example">先看完整示例</Link>
             </div>
           )}
           {courses.length > 0 && filteredCourses.length === 0 && (
@@ -152,30 +204,62 @@ export function CoursesPage() {
             </div>
           )}
           <div className="course-items">
-            {filteredCourses.map((course) => {
-              const progress = course.total_sections === 0
-                ? 0
-                : Math.round((course.completed_sections / course.total_sections) * 100)
-              return (
-              <Link className="course-item" to={`/courses/${course.id}`} key={course.id}>
-                <div className="course-item__content">
-                  <h3>{course.name}</h3>
-                  <p>{course.description || course.learning_goal || '尚未填写课程描述'}</p>
-                  <div className="course-item__progress">
-                    <span>已完成 {course.completed_sections}/{course.total_sections} 个小节</span>
-                    {course.in_progress_sections > 0 && <span>{course.in_progress_sections} 个进行中</span>}
+            {unfinishedCourses.map(courseRow)}
+            {exampleVisible && !normalizedQuery && (
+              <div className="course-item-shell course-item-shell--example">
+                <Link className="course-item course-item--example" to="/example">
+                  <BookMarked size={20} aria-hidden="true" />
+                  <div className="course-item__content">
+                    <div className="course-item__title-row"><h3>MIT 18.06 线性代数示例</h3><span>只读示例</span></div>
+                    <p>查看真实材料驱动的六步学习、12 道练习、逐题批改和最终笔记。</p>
+                    <div className="course-item__progress"><span>完整流程已完成</span><span>不会写入学习数据</span></div>
                   </div>
-                  <div className="progress-track progress-track--compact" aria-label={`已完成 ${course.completed_sections} 个，共 ${course.total_sections} 个小节`}>
-                    <span style={{ width: `${progress}%` }} />
-                  </div>
-                </div>
-                <ArrowRight size={18} aria-hidden="true" />
-              </Link>
-              )
-            })}
+                  <ArrowRight size={18} aria-hidden="true" />
+                </Link>
+                <button
+                  ref={exampleDeleteButton}
+                  className="icon-button course-item-shell__delete"
+                  type="button"
+                  title="删除示例课程"
+                  aria-label="删除示例课程"
+                  onClick={() => setExampleDeleteOpen(true)}
+                >
+                  <Trash2 size={16} aria-hidden="true" />
+                </button>
+              </div>
+            )}
+            {completedCourses.map(courseRow)}
           </div>
       </section>
 
+      <AppDialog
+        open={welcomeOpen}
+        title="欢迎使用 Lumina"
+        description={(
+          <div className="onboarding-welcome">
+            <img src="/favicon-192.png" alt="" width="48" height="48" />
+            <p>从课程和小节开始，按清晰的学习流程持续推进。</p>
+          </div>
+        )}
+        busy={welcomeBusy}
+        closeOnBackdrop={false}
+        showCloseButton={false}
+        onClose={() => undefined}
+        footer={(
+          <button
+            className="primary-button onboarding-welcome__action"
+            type="button"
+            data-dialog-initial-focus
+            disabled={welcomeBusy}
+            onClick={() => void completeOnboarding()}
+          >
+            <BookOpen size={17} aria-hidden="true" />
+            {welcomeBusy ? '正在进入' : '开始使用'}
+          </button>
+        )}
+      >
+        {welcomeError && <p className="dialog-error" role="alert">{welcomeError}</p>}
+      </AppDialog>
       <AppDialog
         open={createOpen}
         title="创建课程"
@@ -214,6 +298,19 @@ export function CoursesPage() {
             </label>
           </form>
       </AppDialog>
+      <TwoStepDeleteDialog
+        open={exampleDeleteOpen}
+        title="删除示例课程？"
+        description="删除后，示例课程将从本机课程首页隐藏，不会影响你的课程和学习数据。"
+        finalDescription="确认永久隐藏内置示例课程？此操作不会删除任何真实课程。"
+        returnFocusTo={exampleDeleteButton.current}
+        onCancel={() => setExampleDeleteOpen(false)}
+        onConfirm={() => {
+          dismissBundledExample()
+          setExampleVisible(false)
+          setExampleDeleteOpen(false)
+        }}
+      />
       <UnsavedChangesGuard
         dirty={createOpen && createDirty}
         onDiscard={() => clearDraft(createCourseDraftKey)}

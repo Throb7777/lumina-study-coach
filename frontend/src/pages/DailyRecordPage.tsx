@@ -323,6 +323,18 @@ export function DailyRecordPage() {
     }
   }, [recordId, activeAiTask, activeServerRunId])
 
+  async function cancelActiveAiTask() {
+    if (!activeServerRun) return
+    try {
+      await api.cancelAiRun(activeServerRun.id)
+      setActiveServerRun(null)
+      setActiveAiTask(null)
+      setNotice('生成任务已取消，可以从原操作重新生成')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '取消生成失败')
+    }
+  }
+
   useEffect(() => {
     if (!record || !pageRef.current) return
     const restoredKeys: string[] = []
@@ -526,6 +538,13 @@ export function DailyRecordPage() {
       if (nextPendingId !== null) nextIds.add(nextPendingId)
       return nextIds
     })
+  }
+
+  function revealNode(baseRecord: DailyRecord, nodeKey: string) {
+    const node = baseRecord.workflow_nodes.find((item) => item.node_key === nodeKey)
+    setRecord(baseRecord)
+    if (!node) return
+    setExpandedNodeIds((currentIds) => new Set([...currentIds, node.id]))
   }
 
   function flowNodeProps(key: string) {
@@ -787,7 +806,9 @@ export function DailyRecordPage() {
     try {
       await api.completeExercise(exerciseId)
       const refreshed = await api.getDailyRecord(record.id)
-      setRecord(refreshed)
+      const practiceNode = refreshed.workflow_nodes.find((node) => node.node_key === 'practice')
+      if (practiceNode) applyUpdatedNode(refreshed, practiceNode)
+      else setRecord(refreshed)
       setNotice('今日练习已完成，可以开始批改')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '完成今日练习失败')
@@ -886,9 +907,7 @@ export function DailyRecordPage() {
           item.response?.verdict === 'incorrect' || item.response?.verdict === 'partial'
         ))
         setActiveReviewItemPosition(firstNeedsReview?.position ?? 1)
-        const reviewNode = latestRecord.workflow_nodes.find((node) => node.node_key === 'review')
-        if (reviewNode) applyUpdatedNode(latestRecord, reviewNode)
-        else setRecord(latestRecord)
+        revealNode(latestRecord, 'review')
       }
       setAiTaskFeedback({ key: 'grading', message: '批改结果已生成', tone: 'success' })
     } catch (requestError) {
@@ -899,6 +918,29 @@ export function DailyRecordPage() {
       })
     } finally {
       setActiveAiTask(null)
+      setBusy(false)
+    }
+  }
+
+  async function completeStructuredReview() {
+    if (!record) return
+    const reviewNode = record.workflow_nodes.find((node) => node.node_key === 'review')
+    if (!reviewNode) return
+    const reviewForms = document.querySelectorAll<HTMLFormElement>(
+      `#flow-node-body-${reviewNode.id} form`,
+    )
+    if (Array.from(reviewForms).some((form) => formIsDirty(form))) {
+      setError('请先保存批改与纠错中的修改')
+      return
+    }
+    setBusy(true)
+    setError('')
+    try {
+      await setNodeStatus('review', 'completed', record)
+      setNotice('批改与纠错已完成')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '完成批改与纠错失败')
+    } finally {
       setBusy(false)
     }
   }
@@ -1124,8 +1166,8 @@ export function DailyRecordPage() {
     setActiveAiTask({ key: 'daily_summary', label: '正在整理今日摘要与学习记忆' })
     setError('')
     try {
-      setRecord(await api.completeDailyRecord(record.id))
-      setExpandedNodeIds(new Set())
+      const completedRecord = await api.completeDailyRecord(record.id)
+      revealNode(completedRecord, 'daily_close')
       setNotice('今日学习已完成')
       return null
     } catch (requestError) {
@@ -1248,6 +1290,7 @@ export function DailyRecordPage() {
           label={activeAiTask.label}
           phase={aiRunPhase(matchingRun)}
           startedAt={matchingRun?.created_at}
+          onCancel={matchingRun ? cancelActiveAiTask : undefined}
         />
       )
     }
@@ -1324,6 +1367,7 @@ export function DailyRecordPage() {
           phase={aiRunPhase(activeServerRun)}
           startedAt={activeServerRun.created_at}
           recovered
+          onCancel={cancelActiveAiTask}
         />
       )}
       <SourceReferences
@@ -1699,6 +1743,21 @@ export function DailyRecordPage() {
                   ))}
                 </div>
               </div>
+              {structuredItems.length > 0 && exercise.status === 'graded' && (
+                <div className="form-actions">
+                  <button
+                    className="primary-button"
+                    type="button"
+                    disabled={busy || nodeByKey('review').status === 'completed'}
+                    onClick={() => void completeStructuredReview()}
+                  >
+                    <Check size={15} />
+                    {nodeByKey('review').status === 'completed'
+                      ? '批改与纠错已完成'
+                      : '完成批改与纠错'}
+                  </button>
+                </div>
+              )}
             </>
           ) : <p className="muted">尚未创建练习</p>}
         </FlowNode>

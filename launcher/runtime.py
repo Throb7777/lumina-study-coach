@@ -28,7 +28,6 @@ class RuntimePaths:
     backend_dir: Path
     pythonw: Path
     frontend_index: Path
-    first_run_marker: Path
     log_file: Path
 
 
@@ -39,7 +38,6 @@ def runtime_paths(project_root: Path | None = None) -> RuntimePaths:
         backend_dir=root / "backend",
         pythonw=root / "backend" / ".venv" / "Scripts" / "pythonw.exe",
         frontend_index=root / "frontend" / "dist" / "index.html",
-        first_run_marker=root / "runtime-data" / "first-run.pending",
         log_file=root / "runtime-data" / "logs" / "server.log",
     )
 
@@ -113,8 +111,7 @@ class SingleInstanceMutex:
 
 
 def open_application(paths: RuntimePaths) -> None:
-    destination = "/settings?setup=1" if paths.first_run_marker.is_file() else "/courses"
-    os.startfile(f"{BASE_URL}{destination}")
+    os.startfile(f"{BASE_URL}/courses")
 
 
 def wait_until_ready(process: subprocess.Popen[bytes] | None, timeout: float = 30) -> bool:

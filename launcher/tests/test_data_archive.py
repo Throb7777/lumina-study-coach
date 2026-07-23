@@ -36,6 +36,9 @@ class DataArchiveTests(unittest.TestCase):
             material = materials / "42" / "source.pdf"
             material.parent.mkdir(parents=True)
             material.write_bytes(b"pdf-content")
+            ocr_cache = materials / "42" / "ocr-cache" / "derived.txt"
+            ocr_cache.parent.mkdir()
+            ocr_cache.write_text("derived", encoding="utf-8")
 
             archive = create_backup_archive(
                 database,
@@ -53,6 +56,7 @@ class DataArchiveTests(unittest.TestCase):
                 {item["path"] for item in manifest["files"]},
                 {"database/learning-flow-coach.db", "materials/42/source.pdf"},
             )
+            self.assertIn("ocr-cache", manifest["excluded"])
 
             restored = root / "restored-runtime-data"
             restore_backup_archive(archive, restored)

@@ -1,0 +1,180 @@
+from __future__ import annotations
+
+import tempfile
+from pathlib import Path
+
+from launcher.release_entry import (
+    apply_install_config,
+    configure_release_environment,
+    initialize_data_root,
+    release_data_root,
+    release_paths,
+    release_port,
+    stop_service,
+    wait_until_stopped,
+)
+
+
+def test_release_data_root_prefers_explicit_override(tmp_path: Path) -> None:
+    environment = {
+        "LUMINA_DATA_DIR": str(tmp_path / "qa-data"),
+        "LOCALAPPDATA": str(tmp_path / "local"),
+    }
+
+    assert release_data_root(environment) == (tmp_path / "qa-data").resolve()
+
+
+def test_release_data_root_uses_local_app_data(tmp_path: Path) -> None:
+    assert release_data_root({"LOCALAPPDATA": str(tmp_path)}) == (tmp_path / "Lumina").resolve()
+
+
+def test_release_data_root_does_not_inherit_when_empty_environment_is_explicit() -> None:
+    assert release_data_root({}) == (Path.home() / ".local" / "share" / "Lumina").resolve()
+
+
+def test_release_port_rejects_invalid_values() -> None:
+    assert release_port({"LEARNING_COACH_PORT": "8123"}) == 8123
+    assert release_port({"LEARNING_COACH_PORT": "invalid"}) == 8000
+    assert release_port({"LEARNING_COACH_PORT": "70000"}) == 8000
+    assert release_port({}) == 8000
+
+
+def test_install_config_sets_defaults_without_overriding_environment(tmp_path: Path) -> None:
+    executable = tmp_path / "app" / "Lumina.exe"
+    executable.parent.mkdir()
+    executable.parent.joinpath("install-config.json").write_text(
+        '{"data_dir":"C:\\\\Lumina QA","port":8124}',
+        encoding="utf-8",
+    )
+    environment = {"LEARNING_COACH_PORT": "8125"}
+
+    apply_install_config(environment, executable)
+
+    assert environment["LUMINA_DATA_DIR"] == r"C:\Lumina QA"
+    assert environment["LEARNING_COACH_PORT"] == "8125"
+
+
+def test_install_config_accepts_windows_utf8_bom(tmp_path: Path) -> None:
+    executable = tmp_path / "app" / "Lumina.exe"
+    executable.parent.mkdir()
+    executable.parent.joinpath("install-config.json").write_text(
+        '{"data_dir":"C:\\\\Lumina QA","port":8124}',
+        encoding="utf-8-sig",
+    )
+    environment: dict[str, str] = {}
+
+    apply_install_config(environment, executable)
+
+    assert environment == {
+        "LUMINA_DATA_DIR": r"C:\Lumina QA",
+        "LEARNING_COACH_PORT": "8124",
+    }
+
+
+def test_release_environment_uses_separate_data_and_bundle_roots(tmp_path: Path) -> None:
+    environment = {
+        "LUMINA_DATA_DIR": str(tmp_path / "data"),
+        "LEARNING_COACH_PORT": "8123",
+    }
+    paths = release_paths(
+        environment,
+        executable=tmp_path / "app" / "Lumina.exe",
+        bundled=tmp_path / "bundle",
+    )
+
+    configure_release_environment(paths, environment)
+
+    assert environment["LEARNING_COACH_HOST"] == "127.0.0.1"
+    assert environment["LEARNING_COACH_PORT"] == "8123"
+    assert environment["LEARNING_COACH_STATIC_DIR"] == str(
+        (tmp_path / "bundle" / "frontend" / "dist").resolve()
+    )
+    assert environment["LEARNING_COACH_RUNTIME_DATA_DIR"] == str(
+        (tmp_path / "data").resolve()
+    )
+    assert environment["LEARNING_COACH_DATABASE_PATH"] == str(
+        (tmp_path / "data" / "learning-flow-coach.db").resolve()
+    )
+    assert environment["LEARNING_COACH_AI_RUNTIME_DIR"] == str(
+        (tmp_path / "data" / "ai").resolve()
+    )
+
+
+def test_first_run_marker_is_created_only_without_a_database() -> None:
+    with tempfile.TemporaryDirectory() as directory:
+        root = Path(directory)
+        environment = {"LUMINA_DATA_DIR": str(root / "new")}
+        paths = release_paths(
+            environment,
+            executable=root / "Lumina.exe",
+            bundled=root / "bundle",
+        )
+
+        initialize_data_root(paths)
+        assert paths.first_run_marker.read_text(encoding="ascii") == "pending"
+
+        paths.first_run_marker.unlink()
+        paths.database.touch()
+        initialize_data_root(paths)
+        assert not paths.first_run_marker.exists()
+
+
+def test_wait_until_stopped_waits_for_health_and_port_release(monkeypatch) -> None:
+    health_states = iter((True, False, False))
+    port_states = iter((True, False))
+    monkeypatch.setattr(
+        "launcher.release_entry.service_is_ready",
+        lambda *_args, **_kwargs: next(health_states),
+    )
+    monkeypatch.setattr(
+        "launcher.release_entry.port_is_in_use",
+        lambda *_args, **_kwargs: next(port_states),
+    )
+    monkeypatch.setattr("launcher.release_entry.time.sleep", lambda _seconds: None)
+
+    assert wait_until_stopped({}, timeout=1)
+
+
+def test_stop_service_waits_after_shutdown_request(monkeypatch) -> None:
+    waited = []
+    monkeypatch.setattr("launcher.release_entry.service_is_ready", lambda *_args: True)
+    monkeypatch.setattr("launcher.release_entry.service_process_id", lambda *_args: 2468)
+    monkeypatch.setattr("launcher.release_entry.request_shutdown", lambda *_args: True)
+    monkeypatch.setattr(
+        "launcher.release_entry.wait_until_stopped",
+        lambda *_args, **kwargs: waited.append(kwargs.get("process_id")) or True,
+    )
+
+    assert stop_service({}, silent=True) == 0
+    assert waited == [2468]
+
+
+def test_stop_service_fails_when_process_does_not_exit(monkeypatch) -> None:
+    monkeypatch.setattr("launcher.release_entry.service_is_ready", lambda *_args: True)
+    monkeypatch.setattr("launcher.release_entry.service_process_id", lambda *_args: 2468)
+    monkeypatch.setattr("launcher.release_entry.request_shutdown", lambda *_args: True)
+    monkeypatch.setattr(
+        "launcher.release_entry.wait_until_stopped",
+        lambda *_args, **_kwargs: False,
+    )
+
+    assert stop_service({}, silent=True) == 1
+
+
+def test_stop_service_ignores_unrelated_port_when_lumina_is_not_running(
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr("launcher.release_entry.service_is_ready", lambda *_args: False)
+    monkeypatch.setattr("launcher.release_entry.service_process_id", lambda *_args: None)
+    monkeypatch.setattr("launcher.release_entry.port_is_in_use", lambda *_args: True)
+
+    assert stop_service({}, silent=True) == 0
+
+
+def test_installer_uses_named_install_and_uninstall_components() -> None:
+    root = Path(__file__).resolve().parents[2]
+    installer = root.joinpath("installer", "Lumina.iss").read_text(encoding="utf-8")
+
+    assert 'MyOutputBase "install_Lumina-"' in installer
+    assert "UninstallFilesDir={app}\\uninstall_Lumina" in installer
+    assert "UninstallDisplayName={#MyAppName}" in installer

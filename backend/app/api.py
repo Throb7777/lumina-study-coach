@@ -45,6 +45,7 @@ from app.ai_workflows import (
     TEXT_OUTPUT_SCHEMA,
     apply_daily_summary_memory,
     build_task_context,
+    cancel_active_ai_run,
     course_context,
     daily_summary_source,
     ensure_chapter_memory,
@@ -130,6 +131,7 @@ from app.notes import (
 from app.prompts import (
     course_completion_prompt,
     daily_summary_prompt,
+    deterministic_choice_verdict,
     grading_prompt,
     practice_generation_prompt,
     preview_questions_prompt,
@@ -180,6 +182,7 @@ from app.schemas import (
     MarkdownValidationRequest,
     MaterialRead,
     MaterialRefreshRead,
+    MaterialSearchSettingsRead,
     MaterialUpdate,
     MaterialUrlCreate,
     MistakeCreate,
@@ -198,6 +201,7 @@ from app.schemas import (
     ObsidianVaultCandidateRead,
     ObsidianVaultDiscoveryRead,
     ObsidianVaultUpdate,
+    OnboardingStatusRead,
     PreviewQuestionSetRead,
     PreviewQuestionsUpdate,
     PreviousPreviewQuestions,
@@ -211,6 +215,16 @@ from app.schemas import (
     SectionUpdate,
     WorkflowNodeRead,
     WorkflowNodeUpdate,
+)
+from app.search_index import (
+    EMBEDDING_MODEL,
+    EMBEDDING_MODEL_SIZE,
+    index_path,
+    model_cache_path,
+    model_ready,
+    prepare_semantic_model_paths,
+    semantic_enabled,
+    set_semantic_enabled,
 )
 from app.vaults import (
     VaultBrowserError,
@@ -783,6 +797,20 @@ def list_ai_runs(
     return list(session.scalars(statement.order_by(AiRun.id.desc()).limit(20)))
 
 
+@router.post("/ai-runs/{run_id}/cancel", status_code=status.HTTP_204_NO_CONTENT)
+def cancel_ai_run(run_id: int, session: SessionDependency) -> Response:
+    run = session.get(AiRun, run_id)
+    if run is None:
+        raise HTTPException(status_code=404, detail="生成任务不存在")
+    if run.status != AiRunStatus.RUNNING:
+        raise HTTPException(status_code=409, detail="生成任务已经结束")
+    run.status = AiRunStatus.FAILED
+    run.error_text = "生成任务已取消，可从原操作重新生成。"
+    session.commit()
+    cancel_active_ai_run(run_id)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
 @router.post(
     "/daily-records/{record_id}/ai-review/{kind}",
     response_model=AiInteractionRead,
@@ -980,7 +1008,9 @@ async def generate_ai_grading(
             graded = by_position.get(item.position)
             if graded is None or item.response is None:
                 raise RuntimeError("validated grading result became inconsistent")
-            item.response.verdict = str(graded["verdict"])
+            item.response.verdict = deterministic_choice_verdict(item) or str(
+                graded["verdict"]
+            )
             item.response.score = None
             item.response.feedback_markdown = normalize_ai_markdown(
                 str(graded["feedback_markdown"])
@@ -992,7 +1022,7 @@ async def generate_ai_grading(
             None,
         )
         if review_node is not None:
-            review_node.status = WorkflowNodeStatus.COMPLETED
+            review_node.status = WorkflowNodeStatus.PENDING
     session.commit()
     return exercise
 
@@ -1133,9 +1163,10 @@ async def run_section_note_background(
                 existing_run=run,
             )
         except asyncio.CancelledError:
-            run.status = AiRunStatus.FAILED
-            run.error_text = "服务已关闭，原生成任务已中断，请重新生成。"
-            session.commit()
+            if run.status == AiRunStatus.RUNNING:
+                run.status = AiRunStatus.FAILED
+                run.error_text = "服务已关闭，原生成任务已中断，请重新生成。"
+                session.commit()
             raise
         except Exception as error:
             session.expire_all()
@@ -1376,30 +1407,66 @@ def list_courses(session: SessionDependency) -> list[CourseSummary]:
         .group_by(Chapter.course_id)
         .subquery()
     )
+    activity_summary = (
+        select(
+            Chapter.course_id.label("course_id"),
+            func.max(DailyRecord.updated_at).label("last_study_at"),
+        )
+        .join(Section, Section.chapter_id == Chapter.id)
+        .join(DailyRecord, DailyRecord.section_id == Section.id)
+        .group_by(Chapter.course_id)
+        .subquery()
+    )
+    total_sections = func.coalesce(section_summary.c.total_sections, 0)
+    in_progress_sections = func.coalesce(section_summary.c.in_progress_sections, 0)
+    course_bucket = case(
+        (Course.completed_at.is_not(None), 2),
+        ((in_progress_sections > 0) | activity_summary.c.last_study_at.is_not(None), 0),
+        else_=1,
+    )
     rows = session.execute(
         select(
             Course,
-            func.coalesce(section_summary.c.total_sections, 0),
+            total_sections,
             func.coalesce(section_summary.c.completed_sections, 0),
-            func.coalesce(section_summary.c.in_progress_sections, 0),
+            in_progress_sections,
+            activity_summary.c.last_study_at,
         )
         .outerjoin(section_summary, section_summary.c.course_id == Course.id)
-        .order_by(Course.id.desc())
+        .outerjoin(activity_summary, activity_summary.c.course_id == Course.id)
+        .order_by(
+            course_bucket,
+            case(
+                (course_bucket == 0, activity_summary.c.last_study_at),
+                (course_bucket == 1, Course.created_at),
+                else_=Course.completed_at,
+            ).desc(),
+            Course.id.desc(),
+        )
     )
     return [
-            CourseSummary(
-                id=course.id,
-                name=course.name,
-                description=course.description,
-                learning_goal=course.learning_goal,
-                completed_at=course.completed_at,
-                completion_summary=course.completion_summary,
-                completion_summary_version=course.completion_summary_version,
-                total_sections=total_sections,
+        CourseSummary(
+            id=course.id,
+            name=course.name,
+            description=course.description,
+            learning_goal=course.learning_goal,
+            completed_at=course.completed_at,
+            completion_summary=course.completion_summary,
+            completion_summary_version=course.completion_summary_version,
+            total_sections=total_sections,
             completed_sections=completed_sections,
             in_progress_sections=in_progress_sections,
+            course_state=(
+                "completed"
+                if course.completed_at is not None
+                else "active"
+                if in_progress_sections > 0 or last_study_at is not None
+                else "not_started"
+            ),
+            last_study_at=last_study_at,
+            created_at=course.created_at,
         )
-        for course, total_sections, completed_sections, in_progress_sections in rows
+        for course, total_sections, completed_sections, in_progress_sections, last_study_at in rows
     ]
 
 
@@ -2514,14 +2581,55 @@ def local_settings_response(request: Request, session: Session) -> LocalSettings
     return LocalSettingsRead(
         obsidian_vault_path=str(vault) if vault is not None else "",
         learner_profile=setting_value(session, "learner_profile"),
+        service_version=request.app.version,
         desktop_launch=request.app.state.shutdown_callback is not None,
-        setup_pending=request.app.state.first_run_marker.is_file(),
+        semantic_search_enabled=semantic_enabled(session),
+        semantic_search_model_ready=model_ready(session),
     )
 
 
 @router.get("/settings", response_model=LocalSettingsRead)
 def get_local_settings(request: Request, session: SessionDependency) -> LocalSettingsRead:
     return local_settings_response(request, session)
+
+
+def material_search_settings(session: Session) -> MaterialSearchSettingsRead:
+    return MaterialSearchSettingsRead(
+        semantic_enabled=semantic_enabled(session),
+        model_ready=model_ready(session),
+        model=EMBEDDING_MODEL,
+        model_size=EMBEDDING_MODEL_SIZE,
+    )
+
+
+@router.get("/settings/material-search", response_model=MaterialSearchSettingsRead)
+def get_material_search_settings(session: SessionDependency) -> MaterialSearchSettingsRead:
+    return material_search_settings(session)
+
+
+@router.post("/settings/material-search/enable", response_model=MaterialSearchSettingsRead)
+async def enable_material_search(session: SessionDependency) -> MaterialSearchSettingsRead:
+    search_index_path = index_path(session)
+    search_model_cache = model_cache_path(session)
+    try:
+        await run_in_threadpool(
+            prepare_semantic_model_paths,
+            search_index_path,
+            search_model_cache,
+        )
+    except Exception as error:
+        raise HTTPException(
+            status_code=503,
+            detail=f"语义检索模型准备失败：{error}",
+        ) from error
+    set_semantic_enabled(session, True)
+    return material_search_settings(session)
+
+
+@router.post("/settings/material-search/disable", response_model=MaterialSearchSettingsRead)
+def disable_material_search(session: SessionDependency) -> MaterialSearchSettingsRead:
+    set_semantic_enabled(session, False)
+    return material_search_settings(session)
 
 
 @router.put("/settings/learner-profile", response_model=LocalSettingsRead)
@@ -2534,11 +2642,16 @@ def update_learner_profile(
     return local_settings_response(request, session)
 
 
-@router.post("/settings/setup-complete", response_model=LocalSettingsRead)
-def complete_initial_setup(request: Request, session: SessionDependency) -> LocalSettingsRead:
+@router.get("/onboarding", response_model=OnboardingStatusRead)
+def get_onboarding_status(request: Request) -> OnboardingStatusRead:
+    return OnboardingStatusRead(pending=request.app.state.first_run_marker.is_file())
+
+
+@router.post("/onboarding/complete", response_model=OnboardingStatusRead)
+def complete_onboarding(request: Request) -> OnboardingStatusRead:
     marker: Path = request.app.state.first_run_marker
     marker.unlink(missing_ok=True)
-    return local_settings_response(request, session)
+    return OnboardingStatusRead(pending=False)
 
 
 def vault_candidate_read(candidate: VaultCandidate) -> ObsidianVaultCandidateRead:
@@ -2575,15 +2688,10 @@ def update_obsidian_vault(
     session: SessionDependency,
 ) -> LocalSettingsRead:
     try:
-        vault = save_vault_path(session, payload.obsidian_vault_path)
+        save_vault_path(session, payload.obsidian_vault_path)
     except NotePathError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
-    return LocalSettingsRead(
-        obsidian_vault_path=str(vault),
-        learner_profile=setting_value(session, "learner_profile"),
-        desktop_launch=request.app.state.shutdown_callback is not None,
-        setup_pending=request.app.state.first_run_marker.is_file(),
-    )
+    return local_settings_response(request, session)
 
 
 @router.get("/notes", response_model=NoteIndexRead)

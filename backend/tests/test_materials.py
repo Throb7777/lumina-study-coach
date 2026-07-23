@@ -1,8 +1,10 @@
 import json
+import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
 import httpx
+import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
@@ -13,6 +15,7 @@ from app.ai_providers import AiProviderError, AiProviderResult
 from app.ai_workflows import build_task_context, used_source_references
 from app.materials import MaterialError, MaterialReference, extract_html, revision_hash
 from app.models import AiRunTask, DailyRecord, DailyRecordMaterial, LearningMaterial
+from app.search_index import EMBEDDING_MODEL, SearchDocument, hybrid_rank_bonuses
 
 
 class MaterialSessionCodex:
@@ -271,6 +274,165 @@ def test_url_fetch_uses_repaired_proxy_without_trusting_stale_environment(
     assert title == "Example"
     assert captured["proxy"] == "http://127.0.0.1:7897"
     assert captured["trust_env"] is False
+
+
+def test_url_fetch_retries_rate_limit_using_retry_after(monkeypatch) -> None:
+    attempts = 0
+    delays: list[float] = []
+
+    class FakeClient:
+        def __init__(self, **kwargs) -> None:
+            del kwargs
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args) -> None:
+            return None
+
+        def get(self, url: str) -> httpx.Response:
+            nonlocal attempts
+            attempts += 1
+            request = httpx.Request("GET", url)
+            if attempts < 3:
+                return httpx.Response(429, request=request, headers={"retry-after": "0.25"})
+            return httpx.Response(
+                200,
+                request=request,
+                headers={"content-type": "text/html"},
+                content=b"<html><body><main>Recovered material</main></body></html>",
+            )
+
+    monkeypatch.setattr(materials_module, "validate_public_url", lambda _: None)
+    monkeypatch.setattr(materials_module, "build_subprocess_environment", lambda: {})
+    monkeypatch.setattr(materials_module.httpx, "Client", FakeClient)
+    monkeypatch.setattr(materials_module.time, "sleep", delays.append)
+
+    final_url, _, _ = materials_module.fetch_url("https://example.test/rate-limited")
+
+    assert final_url == "https://example.test/rate-limited"
+    assert attempts == 3
+    assert delays == [0.25, 0.25]
+
+
+def test_scanned_pdf_pages_use_cached_ocr_text(tmp_path: Path, monkeypatch) -> None:
+    class FakePage:
+        images = [object()]
+
+        def extract_text(self) -> str:
+            return ""
+
+    class FakeReader:
+        pages = [FakePage()]
+
+    source = tmp_path / "versions" / "scan.pdf"
+    source.parent.mkdir()
+    source.write_bytes(b"%PDF-scanned-fixture")
+    calls: list[int] = []
+    monkeypatch.setattr(materials_module, "PdfReader", lambda _: FakeReader())
+    monkeypatch.setattr(
+        materials_module,
+        "_ocr_pdf_page",
+        lambda _path, page_index: calls.append(page_index) or "OCR 识别出的线性代数正文",
+    )
+
+    first = materials_module.extract_pdf(source)
+    second = materials_module.extract_pdf(source)
+
+    assert first == second
+    assert first[0][1] == 1
+    assert "OCR 识别" in first[0][2]
+    assert calls == [0]
+    assert len(list((tmp_path / "ocr-cache").glob("*.txt"))) == 1
+
+
+def test_scanned_pdf_without_tesseract_has_actionable_retry_message(monkeypatch) -> None:
+    monkeypatch.setattr(materials_module, "_tesseract_executable", lambda: None)
+
+    with pytest.raises(MaterialError, match="Tesseract OCR.*重新解析"):
+        materials_module._ocr_pdf_page(Path("scan.pdf"), 0)
+
+
+def test_hybrid_index_uses_local_full_text_and_keeps_primary_database_canonical(
+    app: FastAPI, client: TestClient,
+) -> None:
+    del client
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        bonuses = hybrid_rank_bonuses(
+            session,
+            [
+                SearchDocument("probability", "条件概率定义与贝叶斯公式推导"),
+                SearchDocument("geometry", "向量空间中的正交投影"),
+            ],
+            "条件概率定义",
+        )
+        sidecar = session.get_bind().url.database
+
+    assert bonuses["probability"] > bonuses.get("geometry", 0)
+    assert Path(sidecar).with_name("search-index.db").is_file()
+
+
+def test_semantic_search_setting_requires_model_and_can_be_disabled(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    prepared_cache: Path | None = None
+
+    def fake_prepare(index: Path, cache: Path) -> None:
+        nonlocal prepared_cache
+        prepared_cache = cache
+        cache.mkdir(parents=True, exist_ok=True)
+        model_dir = cache / "model-snapshot"
+        model_dir.mkdir()
+        (model_dir / "model_optimized.onnx").write_bytes(b"model")
+        (model_dir / "tokenizer.json").write_text("{}", encoding="utf-8")
+        with sqlite3.connect(index) as connection:
+            connection.execute(
+                "CREATE TABLE IF NOT EXISTS metadata (key TEXT PRIMARY KEY, value TEXT NOT NULL)"
+            )
+            connection.execute(
+                "INSERT OR REPLACE INTO metadata(key, value) VALUES('model_ready', ?)",
+                (EMBEDDING_MODEL,),
+            )
+
+    initial = client.get("/api/settings/material-search")
+    assert initial.status_code == 200
+    assert initial.json()["semantic_enabled"] is False
+    assert initial.json()["model_ready"] is False
+
+    monkeypatch.setattr(api_module, "prepare_semantic_model_paths", fake_prepare)
+    enabled = client.post("/api/settings/material-search/enable")
+    assert enabled.status_code == 200
+    assert enabled.json()["semantic_enabled"] is True
+    assert enabled.json()["model_ready"] is True
+    assert client.get("/api/settings").json()["semantic_search_enabled"] is True
+
+    disabled = client.post("/api/settings/material-search/disable")
+    assert disabled.status_code == 200
+    assert disabled.json()["semantic_enabled"] is False
+    assert disabled.json()["model_ready"] is True
+
+    assert prepared_cache is not None
+    next(prepared_cache.rglob("model_optimized.onnx")).unlink()
+    missing = client.get("/api/settings/material-search")
+    assert missing.status_code == 200
+    assert missing.json()["model_ready"] is False
+
+
+def test_semantic_search_model_failure_does_not_enable_setting(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    def fail_prepare(_index: Path, _cache: Path) -> None:
+        raise OSError("download unavailable")
+
+    monkeypatch.setattr(api_module, "prepare_semantic_model_paths", fail_prepare)
+    response = client.post("/api/settings/material-search/enable")
+
+    assert response.status_code == 503
+    assert "模型准备失败" in response.json()["detail"]
+    assert client.get("/api/settings/material-search").json()["semantic_enabled"] is False
 
 
 def test_failed_url_material_is_kept_and_can_be_reparsed(

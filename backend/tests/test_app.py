@@ -72,7 +72,7 @@ def test_desktop_service_rejects_cross_site_shutdown(
 
 def test_cross_site_browser_write_is_rejected(client: TestClient) -> None:
     response = client.post(
-        "/api/settings/setup-complete",
+        "/api/onboarding/complete",
         headers={
             "Origin": "https://malicious.example",
             "Sec-Fetch-Site": "cross-site",
@@ -85,7 +85,7 @@ def test_cross_site_browser_write_is_rejected(client: TestClient) -> None:
 
 def test_same_origin_browser_write_is_allowed(client: TestClient) -> None:
     response = client.post(
-        "/api/settings/setup-complete",
+        "/api/onboarding/complete",
         headers={
             "Origin": "http://testserver",
             "Sec-Fetch-Site": "same-origin",
@@ -97,14 +97,14 @@ def test_same_origin_browser_write_is_allowed(client: TestClient) -> None:
 
 def test_null_origin_browser_write_is_rejected(client: TestClient) -> None:
     response = client.post(
-        "/api/settings/setup-complete",
+        "/api/onboarding/complete",
         headers={"Origin": "null", "Sec-Fetch-Site": "same-origin"},
     )
 
     assert response.status_code == 403
 
 
-def test_initial_setup_marker_is_explicitly_completed(
+def test_first_run_onboarding_marker_is_explicitly_completed(
     tmp_path: Path, database_url: str
 ) -> None:
     marker = tmp_path / "first-run.pending"
@@ -117,12 +117,17 @@ def test_initial_setup_marker_is_explicitly_completed(
     )
 
     with TestClient(application) as setup_client:
-        settings_response = setup_client.get("/api/settings")
-        assert settings_response.json()["setup_pending"] is True
+        settings_response = setup_client.get("/api/settings").json()
+        assert "setup_pending" not in settings_response
 
-        complete_response = setup_client.post("/api/settings/setup-complete")
+        status_response = setup_client.get("/api/onboarding")
+        assert status_response.status_code == 200
+        assert status_response.json() == {"pending": True}
+
+        complete_response = setup_client.post("/api/onboarding/complete")
         assert complete_response.status_code == 200
-        assert complete_response.json()["setup_pending"] is False
+        assert complete_response.json() == {"pending": False}
+        assert setup_client.get("/api/onboarding").json() == {"pending": False}
 
     assert not marker.exists()
 

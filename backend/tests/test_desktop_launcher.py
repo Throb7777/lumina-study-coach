@@ -24,23 +24,13 @@ def test_launcher_paths_are_derived_without_a_personal_absolute_path(tmp_path: P
 
     assert paths.pythonw == tmp_path / "backend" / ".venv" / "Scripts" / "pythonw.exe"
     assert paths.frontend_index == tmp_path / "frontend" / "dist" / "index.html"
-    assert paths.first_run_marker == tmp_path / "runtime-data" / "first-run.pending"
 
 
-def test_launcher_opens_first_run_settings_only_while_marker_exists(
-    tmp_path: Path, monkeypatch
-) -> None:
+def test_launcher_always_opens_the_course_home(tmp_path: Path, monkeypatch) -> None:
     paths = runtime_paths(tmp_path)
     opened: list[str] = []
     monkeypatch.setattr("launcher.runtime.os.startfile", opened.append)
 
-    paths.first_run_marker.parent.mkdir(parents=True)
-    paths.first_run_marker.write_text("pending", encoding="ascii")
-    open_application(paths)
-    paths.first_run_marker.unlink()
     open_application(paths)
 
-    assert opened == [
-        "http://127.0.0.1:8000/settings?setup=1",
-        "http://127.0.0.1:8000/courses",
-    ]
+    assert opened == ["http://127.0.0.1:8000/courses"]

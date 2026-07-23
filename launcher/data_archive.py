@@ -54,10 +54,13 @@ def _material_files(materials: Path) -> list[tuple[Path, str]]:
     for source in sorted(materials.rglob("*")):
         if source.is_symlink() or not source.is_file():
             continue
+        relative = source.relative_to(materials)
+        if "ocr-cache" in relative.parts:
+            continue
         resolved = source.resolve()
         if not resolved.is_relative_to(resolved_root):
             raise ArchiveError("material path escapes the material directory")
-        member = MATERIALS_PREFIX + source.relative_to(materials).as_posix()
+        member = MATERIALS_PREFIX + relative.as_posix()
         files.append((source, member))
     return files
 
@@ -95,7 +98,7 @@ def create_backup_archive(
                 }
                 for source, member in files
             ],
-            "excluded": ["ai-auth", "logs", "service.pid", "backups"],
+            "excluded": ["ai-auth", "logs", "service.pid", "backups", "ocr-cache", "search-index"],
         }
         temporary_archive = destination_root / f".{destination.name}.{uuid4().hex}.tmp"
         try:

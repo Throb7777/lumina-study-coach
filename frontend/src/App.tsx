@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { BookX, Library, NotebookPen, PanelLeftClose, PanelLeftOpen, Server, Settings } from 'lucide-react'
+import { BookX, Library, NotebookPen, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
 import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router-dom'
 import './App.css'
 import {
@@ -121,10 +121,6 @@ function App() {
           <NavLink className="nav-link" to="/notes" title={sidebarCollapsed ? '笔记' : undefined}>
             <NotebookPen size={18} aria-hidden="true" />
             <span className="nav-label">笔记</span>
-          </NavLink>
-          <NavLink className="nav-link" to="/status" title={sidebarCollapsed ? '运行状态' : undefined}>
-            <Server size={18} aria-hidden="true" />
-            <span className="nav-label">运行状态</span>
           </NavLink>
           <NavLink className="nav-link" to="/settings" title={sidebarCollapsed ? '设置' : undefined}>
             <Settings size={18} aria-hidden="true" />

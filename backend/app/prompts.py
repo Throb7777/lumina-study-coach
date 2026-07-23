@@ -1,4 +1,4 @@
-from app.models import DailyRecord, Exercise
+from app.models import DailyRecord, Exercise, ExerciseItem, ExerciseItemType
 
 MARKDOWN_MATH_RULES = """输出格式要求：
 - 使用清晰的 Markdown，不要在最外层包裹 Markdown 代码块
@@ -15,6 +15,20 @@ STRUCTURED_RESULT_RULES = """请同时返回：
   `chunk_positions` 和一句简短 `evidence_summary`，编号必须来自材料中的 `[M编号:C编号]`
 - 没有直接使用材料时，`handoff.source_refs` 返回空数组
 输出必须符合系统指定的 JSON 结构。"""
+
+
+def deterministic_choice_verdict(item: ExerciseItem) -> str | None:
+    if item.item_type not in {
+        ExerciseItemType.SINGLE_CHOICE,
+        ExerciseItemType.MULTIPLE_CHOICE,
+    }:
+        return None
+    expected = item.answer_key.get("selected_options")
+    if not isinstance(expected, list) or item.response is None:
+        return None
+    expected_set = {str(option) for option in expected}
+    selected_set = set(item.response.selected_options)
+    return "correct" if selected_set == expected_set else "incorrect"
 
 
 def daily_summary_prompt(source: str) -> str:
@@ -123,6 +137,7 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
         item_blocks: list[str] = []
         for item in exercise.items:
             response = item.response
+            local_verdict = deterministic_choice_verdict(item)
             item_blocks.append(
                 f"""第 {item.position} 题
 题型：{item.item_type.value}
@@ -131,7 +146,8 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
 参考答案：{item.answer_key_json}
 评分标准：{item.rubric_markdown}
 我的选择：{response.selected_options_json if response else "[]"}
-我的作答：{response.answer_markdown if response else "未作答"}"""
+我的作答：{response.answer_markdown if response else "未作答"}
+本地选择题判定：{local_verdict or "不适用，由你依据评分标准判断"}"""
             )
         return f"""你是一名严谨的练习批改助手。请一次批改整套 12 道题，不要继续追问。
 
@@ -146,6 +162,9 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
   - correct：只需明确说明“正确”，必要时补充一句关键理由
   - partial：指出缺失或不完整之处，并给出补全思路
   - incorrect：明确指出具体错误，并给出正确思路和必要步骤
+
+选择题的“本地选择题判定”由答案键精确比对得到，`verdict` 必须与它一致；
+你只负责给出简洁解释。非选择题仍由你依据参考答案和评分标准判断。
 
 不要生成整套分数或总评，不要继续追问，也不要生成新题。
 反馈必须对应用户的实际作答；正确题不要重复输出冗长标准答案。

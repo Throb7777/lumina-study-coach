@@ -12,19 +12,37 @@ backend/.uv-cache/
 .ruff_cache/
 
 # Environment and local data
-.env
-backend/.env
+.env*
+!.env.example
+!backend/.env.example
 *.db
 *.db-shm
 *.db-wal
+*.sqlite
+*.sqlite3
+*.log
+*.pid
 data/
+!frontend/src/data/
+!frontend/src/data/example-course.json
+!frontend/src/data/EXAMPLE_LICENSE.md
 runtime-data/
 exports/
+backups/
 
 # Test and editor artifacts
 output/
 test-results/
 .playwright-cli/
+.agents/
+.codex/
+.private-docs/
+.coverage
+coverage.xml
+htmlcov/
+.mypy_cache/
+.hypothesis/
+*.egg-info/
 .idea/
 .vscode/
 .DS_Store

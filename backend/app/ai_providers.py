@@ -526,6 +526,16 @@ class CodexAppServer:
             state = self.turns.setdefault(turn_id, TurnState())
             try:
                 await asyncio.wait_for(state.completed.wait(), timeout=timeout_seconds)
+            except asyncio.CancelledError:
+                with suppress(AiProviderError, TimeoutError):
+                    await asyncio.wait_for(
+                        self.request(
+                            "turn/interrupt",
+                            {"threadId": thread_id, "turnId": turn_id},
+                        ),
+                        timeout=5,
+                    )
+                raise
             except TimeoutError as error:
                 with suppress(AiProviderError, TimeoutError):
                     await asyncio.wait_for(
@@ -645,6 +655,10 @@ class AntigravityCli:
         )
         try:
             stdout, stderr = await asyncio.wait_for(process.communicate(), timeout=timeout)
+        except asyncio.CancelledError:
+            process.kill()
+            await process.wait()
+            raise
         except TimeoutError:
             process.kill()
             await process.wait()

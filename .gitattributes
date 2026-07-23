@@ -1,0 +1,31 @@
+* text=auto
+
+*.py text eol=lf
+*.pyw text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.js text eol=lf
+*.mjs text eol=lf
+*.json text eol=lf
+*.md text eol=lf
+*.toml text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ps1 text eol=crlf
+*.cmd text eol=crlf
+*.iss text eol=crlf
+
+*.png binary
+*.ico binary
+*.pdf binary
+*.zip binary
+*.exe binary
+*.dat binary
+
+AGENTS.md export-ignore
+IMPLEMENTATION_PROGRESS.md export-ignore
+learning_flow_coach_spec.md export-ignore
+design-references/ export-ignore
+docs/real-example-acceptance.md export-ignore
+scripts/qa_example_app.py export-ignore
+scripts/qa_real_example.py export-ignore

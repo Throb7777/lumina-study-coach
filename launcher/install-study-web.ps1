@@ -54,6 +54,68 @@ function Install-Prerequisite([string]$Name, [string]$WingetId) {
     Refresh-ProcessPath
 }
 
+function Prepare-OptionalOcr {
+    $tesseractCommand = Get-Command tesseract.exe -ErrorAction SilentlyContinue
+    $tesseractPath = if ($tesseractCommand) { $tesseractCommand.Source } else { $null }
+    if (-not $tesseractPath) {
+        $candidate = Join-Path $env:ProgramFiles 'Tesseract-OCR\tesseract.exe'
+        if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+            $tesseractPath = $candidate
+        }
+    }
+    if (-not $tesseractPath) {
+        Write-Warning '未检测到可选的 Tesseract OCR。普通 PDF 不受影响；扫描 PDF 会保留为可重试状态。'
+        if ($NoInstallPrerequisites) { return }
+        if (-not (Get-Command winget.exe -ErrorAction SilentlyContinue)) {
+            Write-Warning '当前系统没有 WinGet，已跳过可选 OCR 安装。'
+            return
+        }
+        $installChoice = Read-Host '是否安装 Tesseract OCR 以支持扫描 PDF？[Y/N]'
+        if ($installChoice -notmatch '^[Yy]$') { return }
+        & winget.exe install --id tesseract-ocr.tesseract --exact --source winget --accept-package-agreements --accept-source-agreements
+        if ($LASTEXITCODE -ne 0) {
+            Write-Warning "Tesseract 安装失败，退出码：$LASTEXITCODE。其余 Lumina 功能不受影响。"
+            return
+        }
+        Refresh-ProcessPath
+        $tesseractCommand = Get-Command tesseract.exe -ErrorAction SilentlyContinue
+        $tesseractPath = if ($tesseractCommand) { $tesseractCommand.Source } else { $null }
+        if (-not $tesseractPath) {
+            $candidate = Join-Path $env:ProgramFiles 'Tesseract-OCR\tesseract.exe'
+            if (Test-Path -LiteralPath $candidate -PathType Leaf) {
+                $tesseractPath = $candidate
+            }
+        }
+    }
+    if (-not $tesseractPath) { return }
+    $languages = & $tesseractPath --list-langs 2>$null
+    if ($languages -contains 'chi_sim' -and $languages -contains 'eng') {
+        Write-Host '[通过] Tesseract 中文与英文语言包可用。'
+        return
+    }
+    if ($NoInstallPrerequisites) {
+        Write-Warning 'Tesseract 缺少 chi_sim 或 eng 语言包，扫描 PDF 中文识别暂不可用。'
+        return
+    }
+    $languageChoice = Read-Host 'Tesseract 缺少中文语言包，是否从官方 tessdata_fast 下载约 2.5 MB？[Y/N]'
+    if ($languageChoice -notmatch '^[Yy]$') { return }
+    $target = Join-Path $RuntimeData 'ocr\tessdata'
+    New-Item -ItemType Directory -Force -Path $target | Out-Null
+    $systemTessdata = Join-Path (Split-Path -Parent $tesseractPath) 'tessdata'
+    $temporaryLanguage = Join-Path $target 'chi_sim.traineddata.download'
+    try {
+        Copy-Item -LiteralPath (Join-Path $systemTessdata 'eng.traineddata') -Destination $target -Force
+        $languageUrl = 'https://raw.githubusercontent.com/tesseract-ocr/tessdata_fast/main/chi_sim.traineddata'
+        Invoke-WebRequest -Uri $languageUrl -OutFile $temporaryLanguage
+        Move-Item -LiteralPath $temporaryLanguage -Destination (Join-Path $target 'chi_sim.traineddata') -Force
+        Write-Host '[通过] 扫描 PDF 的中文与英文 OCR 语言包已准备。'
+    }
+    catch {
+        Remove-Item -LiteralPath $temporaryLanguage -Force -ErrorAction SilentlyContinue
+        Write-Warning "OCR 语言包准备失败：$($_.Exception.Message)。其余 Lumina 功能不受影响，可稍后重新运行安装/修复。"
+    }
+}
+
 function Require-Command([string]$Command, [string]$Name, [string]$WingetId) {
     if (-not (Get-Command $Command -ErrorAction SilentlyContinue)) {
         Install-Prerequisite $Name $WingetId
@@ -115,6 +177,7 @@ Require-Command 'npm.cmd' 'npm' 'OpenJS.NodeJS.LTS'
 Require-MinimumVersion 'uv' (& uv.exe --version | Select-Object -Last 1).Replace('uv ', '') ([version]'0.11.0')
 Require-MinimumVersion 'Node.js' (& node.exe --version | Select-Object -Last 1) ([version]'22.12.0')
 Require-MinimumVersion 'npm' (& npm.cmd --version | Select-Object -Last 1) ([version]'11.0.0')
+Prepare-OptionalOcr
 
 Write-Host ''
 Write-Host '[1/3] 准备 Python 3.12 和后端依赖...'

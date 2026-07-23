@@ -25,6 +25,9 @@ export interface CourseSummary extends Course {
   total_sections: number
   completed_sections: number
   in_progress_sections: number
+  course_state: 'active' | 'not_started' | 'completed'
+  last_study_at: string | null
+  created_at: string
 }
 
 export interface Section {
@@ -260,8 +263,21 @@ export interface SectionNotePrompt {
 export interface LocalSettings {
   obsidian_vault_path: string
   learner_profile: string
+  service_version: string
   desktop_launch: boolean
-  setup_pending: boolean
+  semantic_search_enabled: boolean
+  semantic_search_model_ready: boolean
+}
+
+export interface OnboardingStatus {
+  pending: boolean
+}
+
+export interface MaterialSearchSettings {
+  semantic_enabled: boolean
+  model_ready: boolean
+  model: string
+  model_size: string
 }
 
 export interface CourseCompletion {
@@ -695,6 +711,8 @@ export const api = {
     if (activeOnly) params.set('active_only', 'true')
     return request<AiRun[]>(`/api/ai-runs?${params}`, { signal })
   },
+  cancelAiRun: (runId: number) =>
+    request<void>(`/api/ai-runs/${runId}/cancel`, { method: 'POST' }),
   updateDailyRecord: (recordId: number, payload: Partial<DailyRecordContent>) =>
     request<DailyRecord>(`/api/daily-records/${recordId}`, {
       method: 'PATCH',
@@ -821,8 +839,16 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   getSettings: (signal?: AbortSignal) => request<LocalSettings>('/api/settings', { signal }),
-  completeInitialSetup: () =>
-    request<LocalSettings>('/api/settings/setup-complete', { method: 'POST' }),
+  getMaterialSearchSettings: (signal?: AbortSignal) =>
+    request<MaterialSearchSettings>('/api/settings/material-search', { signal }),
+  enableMaterialSearch: () =>
+    request<MaterialSearchSettings>('/api/settings/material-search/enable', { method: 'POST' }),
+  disableMaterialSearch: () =>
+    request<MaterialSearchSettings>('/api/settings/material-search/disable', { method: 'POST' }),
+  getOnboardingStatus: (signal?: AbortSignal) =>
+    request<OnboardingStatus>('/api/onboarding', { signal }),
+  completeOnboarding: () =>
+    request<OnboardingStatus>('/api/onboarding/complete', { method: 'POST' }),
   shutdownLocalService: () =>
     request<{ status: 'stopping' }>('/api/system/shutdown', {
       method: 'POST',

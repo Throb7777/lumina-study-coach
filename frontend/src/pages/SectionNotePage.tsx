@@ -124,6 +124,20 @@ export function SectionNotePage() {
       window.clearTimeout(timer)
     }
   }, [pendingDraft, pendingDraftRunId, setNotice])
+
+  async function cancelActiveAiTask() {
+    if (!activeServerRun) return
+    try {
+      await api.cancelAiRun(activeServerRun.id)
+      setActiveServerRun(null)
+      setActiveAiTask('')
+      setPendingDraftRunId(null)
+      setNotice('生成任务已取消，可以从原操作重新生成')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '取消生成失败')
+    }
+  }
+
   const [pendingValidation, setPendingValidation] = useState<{
     result: MarkdownValidation
     complete: boolean
@@ -313,6 +327,7 @@ export function SectionNotePage() {
               : `正在等待 ${activeServerRun?.provider === 'gemini' ? 'Gemini' : 'Codex'} 生成结果`}
             startedAt={activeServerRun?.created_at}
             recovered={!activeAiTask}
+            onCancel={activeServerRun ? cancelActiveAiTask : undefined}
           />
         )}
         {vaultMissing && <p><Link className="primary-button inline-link-button" to="/settings">配置 Obsidian 路径</Link></p>}

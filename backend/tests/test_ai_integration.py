@@ -1,10 +1,12 @@
 import asyncio
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy.orm import Session, sessionmaker
 
 import app.ai_providers as ai_providers_module
 from app.ai_providers import (
@@ -21,6 +23,7 @@ from app.ai_providers import (
     friendly_provider_launch_error,
     resolve_codex_executable,
 )
+from app.models import AiProvider, AiRun, AiRunStatus, AiRunTask
 
 
 def structured_items() -> list[dict]:
@@ -44,6 +47,32 @@ def structured_items() -> list[dict]:
         }
         for position in range(1, 13)
     ]
+
+
+def test_ai_run_can_be_cancelled_and_retried_from_the_original_action(
+    client: TestClient, app: FastAPI
+) -> None:
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        run = AiRun(
+            provider=AiProvider.CODEX,
+            task=AiRunTask.PRACTICE_GENERATION,
+            status=AiRunStatus.RUNNING,
+            context_snapshot="context",
+            prompt_text="prompt",
+        )
+        session.add(run)
+        session.commit()
+        run_id = run.id
+
+    response = client.post(f"/api/ai-runs/{run_id}/cancel")
+    assert response.status_code == 204
+    with session_factory() as session:
+        cancelled = session.get(AiRun, run_id)
+        assert cancelled is not None
+        assert cancelled.status == AiRunStatus.FAILED
+        assert "已取消" in cancelled.error_text
+    assert client.post(f"/api/ai-runs/{run_id}/cancel").status_code == 409
 
 
 class FakeCodex:
@@ -674,6 +703,44 @@ def test_codex_uses_gpt_5_5_with_medium_effort(tmp_path, monkeypatch) -> None:
     assert codex.active_model == "gpt-5.5"
 
 
+def test_codex_cancellation_interrupts_the_active_turn(tmp_path, monkeypatch) -> None:
+    codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+    calls: list[str] = []
+    turn_started = asyncio.Event()
+
+    async def fake_account():
+        return {"email": "test@example.com"}
+
+    async def fake_request(method: str, params: dict):
+        calls.append(method)
+        if method == "model/list":
+            return {"data": [{"model": "gpt-5.5"}]}
+        if method == "thread/start":
+            return {"thread": {"id": "thread-1"}}
+        if method == "turn/start":
+            turn_started.set()
+            return {"turn": {"id": "turn-1"}}
+        if method == "turn/interrupt":
+            assert params == {"threadId": "thread-1", "turnId": "turn-1"}
+            return {}
+        raise AssertionError(f"Unexpected method: {method}")
+
+    monkeypatch.setattr(codex, "account", fake_account)
+    monkeypatch.setattr(codex, "request", fake_request)
+
+    async def cancel_active_generation() -> None:
+        task = asyncio.create_task(codex.generate("测试取消", timeout_seconds=30))
+        await turn_started.wait()
+        task.cancel()
+        with pytest.raises(asyncio.CancelledError):
+            await task
+
+    asyncio.run(cancel_active_generation())
+
+    assert "turn/interrupt" in calls
+    assert "turn-1" not in codex.turns
+
+
 def test_antigravity_print_mode_uses_plain_output(tmp_path, monkeypatch) -> None:
     antigravity = AntigravityCli(tmp_path / "workspace")
     antigravity.executable = "agy"
@@ -837,7 +904,10 @@ def test_embedded_ai_workflow_and_learning_memory(client: TestClient, app: FastA
     assert client.delete(f"/api/exercises/{exercise_id}").status_code == 409
     for item in exercise_body["items"]:
         payload = (
-            {"selected_options": ["A"], "answer_markdown": ""}
+            {
+                "selected_options": ["B"] if item["position"] == 1 else ["A"],
+                "answer_markdown": "",
+            }
             if item["options"]
             else {"selected_options": [], "answer_markdown": f"Answer {item['position']}"}
         )
@@ -849,6 +919,14 @@ def test_embedded_ai_workflow_and_learning_memory(client: TestClient, app: FastA
     assert grading.json()["ai_feedback"] == ""
     assert all(item["response"]["status"] == "graded" for item in grading.json()["items"])
     assert all(item["response"]["score"] is None for item in grading.json()["items"])
+    assert grading.json()["items"][0]["response"]["verdict"] == "incorrect"
+    assert grading.json()["items"][1]["response"]["verdict"] == "correct"
+    assert "本地选择题判定：incorrect" in app.state.ai_service.codex.prompts[-1]
+    refreshed_record = client.get(f"/api/daily-records/{record['id']}").json()
+    review_node = next(
+        node for node in refreshed_record["workflow_nodes"] if node["node_key"] == "review"
+    )
+    assert review_node["status"] == "pending"
 
     preview = client.post(f"/api/daily-records/{record['id']}/ai-preview-questions")
     assert preview.json()["question_1"] == "问题一"
@@ -930,6 +1008,7 @@ def test_invalid_structured_output_marks_ai_run_failed(
     runs = client.get(f"/api/ai-runs?daily_record_id={record['id']}").json()
     assert runs[0]["task"] == "practice_generation"
     assert runs[0]["status"] == "failed"
+    assert datetime.fromisoformat(runs[0]["created_at"].replace("Z", "+00:00")).tzinfo == UTC
 
 
 def test_business_ai_error_returns_actionable_http_status_after_local_material_setup(

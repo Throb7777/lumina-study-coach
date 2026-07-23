@@ -636,6 +636,14 @@ class ExerciseItem(TimestampMixin, Base):
             return []
         return [str(item) for item in value] if isinstance(value, list) else []
 
+    @property
+    def answer_key(self) -> dict[str, object]:
+        try:
+            value = json.loads(self.answer_key_json)
+        except json.JSONDecodeError:
+            return {}
+        return value if isinstance(value, dict) else {}
+
 
 class ExerciseResponse(TimestampMixin, Base):
     __tablename__ = "exercise_responses"

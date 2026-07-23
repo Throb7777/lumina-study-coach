@@ -4,9 +4,13 @@ on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   frontend:
     runs-on: windows-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: frontend
@@ -22,6 +26,7 @@ jobs:
 
   backend-and-launcher:
     runs-on: windows-latest
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
@@ -37,7 +42,10 @@ jobs:
         working-directory: backend
       - run: uv run pytest -q
         working-directory: backend
+      - run: uv run alembic upgrade head
+        working-directory: backend
       - run: uv run alembic check
         working-directory: backend
       - run: uv run --project backend ruff check launcher
       - run: uv run --project backend python -m unittest discover -s launcher/tests -v
+      - run: uv run --project backend python scripts/check_release_metadata.py

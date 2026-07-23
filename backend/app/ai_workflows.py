@@ -1,3 +1,4 @@
+import asyncio
 import json
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -41,6 +42,16 @@ HANDOFF_FIELDS = (
     "error_patterns",
     "source_refs",
 )
+
+ACTIVE_AI_TASKS: dict[int, asyncio.Task[Any]] = {}
+
+
+def cancel_active_ai_run(run_id: int) -> bool:
+    task = ACTIVE_AI_TASKS.get(run_id)
+    if task is None or task.done():
+        return False
+    task.cancel()
+    return True
 
 SOURCE_REFERENCE_SCHEMA = {
     "type": "object",
@@ -731,6 +742,22 @@ async def run_codex(
     payload_validator: Callable[[dict[str, Any]], None] | None = None,
 ) -> AiProviderResult:
     preference = codex_preference(session)
+    if existing_run is None:
+        conditions = [
+            AiRun.task == task,
+            AiRun.status == AiRunStatus.RUNNING,
+        ]
+        for column, value in (
+            (AiRun.course_id, course_id),
+            (AiRun.section_id, section_id),
+            (AiRun.daily_record_id, daily_record_id),
+            (AiRun.exercise_id, exercise_id),
+        ):
+            if value is not None:
+                conditions.append(column == value)
+        duplicate = session.scalar(select(AiRun).where(*conditions).limit(1))
+        if duplicate is not None:
+            raise AiProviderError("同一生成任务仍在运行，请等待完成或先取消")
     run = existing_run or AiRun(provider=AiProvider.CODEX, task=task)
     run.status = AiRunStatus.RUNNING
     run.course_id = course_id
@@ -754,6 +781,9 @@ async def run_codex(
     if existing_run is None:
         session.add(run)
     session.commit()
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        ACTIVE_AI_TASKS[run.id] = current_task
     try:
         provider_options: dict[str, Any] = {}
         if material_context_session is not None:
@@ -815,11 +845,19 @@ async def run_codex(
             display_markdown = payload.get("display_markdown")
             if isinstance(display_markdown, str):
                 result.text = display_markdown
+    except asyncio.CancelledError:
+        run.status = AiRunStatus.FAILED
+        run.error_text = "生成任务已取消，可从原操作重新生成。"
+        session.commit()
+        raise
     except Exception as error:
         run.status = AiRunStatus.FAILED
         run.error_text = str(error)
         session.commit()
         raise
+    finally:
+        if current_task is not None and ACTIVE_AI_TASKS.get(run.id) is current_task:
+            ACTIVE_AI_TASKS.pop(run.id, None)
     run.status = AiRunStatus.COMPLETED
     run.output_text = result.text
     run.model = result.model
@@ -859,13 +897,24 @@ async def run_gemini(
     )
     session.add(run)
     session.commit()
+    current_task = asyncio.current_task()
+    if current_task is not None:
+        ACTIVE_AI_TASKS[run.id] = current_task
     try:
         result = await ai_service.gemini.generate(prompt, selected_model)
+    except asyncio.CancelledError:
+        run.status = AiRunStatus.FAILED
+        run.error_text = "生成任务已取消，可从原操作重新生成。"
+        session.commit()
+        raise
     except AiProviderError as error:
         run.status = AiRunStatus.FAILED
         run.error_text = str(error)
         session.commit()
         raise
+    finally:
+        if current_task is not None and ACTIVE_AI_TASKS.get(run.id) is current_task:
+            ACTIVE_AI_TASKS.pop(run.id, None)
     run.status = AiRunStatus.COMPLETED
     run.output_text = result.text
     run.model = result.model

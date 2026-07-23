@@ -11,7 +11,6 @@ import {
   notesLoader,
   sectionNoteLoader,
   settingsLoader,
-  statusLoader,
 } from './routeData'
 
 export const appRoutes: RouteObject[] = [
@@ -71,11 +70,7 @@ export const appRoutes: RouteObject[] = [
         loader: libraryNoteLoader,
         lazy: async () => ({ Component: (await import('./pages/SectionNotePage')).SectionNotePage }),
       },
-      {
-        path: 'status',
-        loader: statusLoader,
-        lazy: async () => ({ Component: (await import('./pages/StatusPage')).StatusPage }),
-      },
+      { path: 'status', element: <Navigate to="/settings#local-service" replace /> },
       {
         path: 'settings',
         loader: settingsLoader,

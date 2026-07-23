@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import {
   Bot,
-  BookMarked,
+  CircleAlert,
+  CircleCheck,
+  Database,
   Download,
   ExternalLink,
   FolderCog,
@@ -17,7 +19,12 @@ import {
   Type,
   UserRound,
 } from 'lucide-react'
-import { Link, useLoaderData, useNavigate, useOutletContext, useSearchParams } from 'react-router-dom'
+import {
+  useLoaderData,
+  useLocation,
+  useOutletContext,
+  useSearchParams,
+} from 'react-router-dom'
 import type { AppOutletContext } from '../App'
 import { api } from '../api'
 import type {
@@ -26,6 +33,7 @@ import type {
   AiProviderStatus,
   CourseSummary,
   ExportContentType,
+  MaterialSearchSettings,
   ObsidianVaultCandidate,
 } from '../api'
 import { AppDialog } from '../components/AppDialog'
@@ -96,13 +104,12 @@ function SizeControl<T extends UiFontSize | EditorFontSize>({ label, value, onCh
 
 export function SettingsPage() {
   const routeData = useLoaderData() as SettingsRouteData
-  const navigate = useNavigate()
+  const location = useLocation()
   const { appearance, onAppearanceChange } = useOutletContext<AppOutletContext>()
   const [searchParams, setSearchParams] = useSearchParams()
   const initialVaultPath = routeData.settings?.obsidian_vault_path ?? ''
   const initialLearnerProfile = routeData.settings?.learner_profile ?? ''
   const desktopLaunch = routeData.settings?.desktop_launch ?? false
-  const setupMode = searchParams.get('setup') === '1'
   const [restoredManualPath] = useState<string | null>(() => readDraft(manualVaultDraftKey, initialVaultPath))
   const [vaultPath, setVaultPath] = useState(initialVaultPath)
   const [manualPath, setManualPath] = useState(restoredManualPath ?? initialVaultPath)
@@ -146,27 +153,47 @@ export function SettingsPage() {
   const [geminiDisconnectOpen, setGeminiDisconnectOpen] = useState(false)
   const [geminiDisconnectError, setGeminiDisconnectError] = useState('')
   const [geminiDisconnectTrigger, setGeminiDisconnectTrigger] = useState<HTMLButtonElement | null>(null)
-  const [setupBusy, setSetupBusy] = useState(false)
-  const [setupError, setSetupError] = useState('')
   const [shutdownOpen, setShutdownOpen] = useState(false)
   const [shutdownBusy, setShutdownBusy] = useState(false)
   const [shutdownError, setShutdownError] = useState('')
   const [serviceStopped, setServiceStopped] = useState(false)
   const [materialDialogTrigger, setMaterialDialogTrigger] = useState<HTMLButtonElement | null>(null)
+  const [materialSearch, setMaterialSearch] = useState<MaterialSearchSettings>({
+    semantic_enabled: routeData.settings?.semantic_search_enabled ?? false,
+    model_ready: routeData.settings?.semantic_search_model_ready ?? false,
+    model: 'sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2',
+    model_size: '约 220 MB',
+  })
+  const [materialSearchBusy, setMaterialSearchBusy] = useState(false)
+  const [materialSearchError, setMaterialSearchError] = useState('')
   const materialDialogOpen = searchParams.get('dialog') === 'materials'
+
+  useEffect(() => {
+    if (location.hash !== '#local-service') return
+    const frame = window.requestAnimationFrame(() => {
+      document.getElementById('local-service')?.scrollIntoView({ block: 'start' })
+    })
+    return () => window.cancelAnimationFrame(frame)
+  }, [location.hash])
 
   const hasUnsavedSettings = manualPath !== vaultPath || learnerProfile !== savedLearnerProfile
 
-  async function completeInitialSetup() {
-    setSetupBusy(true)
-    setSetupError('')
+  async function toggleSemanticSearch() {
+    setMaterialSearchBusy(true)
+    setMaterialSearchError('')
     try {
-      await api.completeInitialSetup()
-      navigate('/courses', { replace: true })
+      const needsModel = !materialSearch.semantic_enabled || !materialSearch.model_ready
+      const updated = needsModel
+        ? await api.enableMaterialSearch()
+        : await api.disableMaterialSearch()
+      setMaterialSearch(updated)
+      setNotice(updated.semantic_enabled ? '语义检索已启用' : '语义检索已关闭')
     } catch (requestError) {
-      setSetupError(requestError instanceof Error ? requestError.message : '无法完成首次设置')
+      setMaterialSearchError(
+        requestError instanceof Error ? requestError.message : '更新语义检索设置失败',
+      )
     } finally {
-      setSetupBusy(false)
+      setMaterialSearchBusy(false)
     }
   }
 
@@ -639,32 +666,6 @@ export function SettingsPage() {
       {error && <p className="error-banner" role="alert">{error}</p>}
       {notice && <p className="notice-banner" role="status">{notice}</p>}
 
-      {setupMode && (
-        <section className="initial-setup" aria-labelledby="initial-setup-title">
-          <div>
-            <p className="eyebrow">首次使用 Lumina</p>
-            <h2 id="initial-setup-title">完成本机设置</h2>
-            <p>依次检查模型连接、学习者背景和 Obsidian。除 Codex 外，其余项目可以稍后再配置。</p>
-          </div>
-          <div className="initial-setup__actions">
-            {setupError && <p className="inline-error" role="alert">{setupError}</p>}
-            {hasUnsavedSettings && <span>请先保存当前修改</span>}
-            <Link className="secondary-button" to="/example">
-              <BookMarked size={16} aria-hidden="true" />
-              查看完整示例
-            </Link>
-            <button
-              className="primary-button"
-              type="button"
-              disabled={setupBusy || hasUnsavedSettings}
-              onClick={() => void completeInitialSetup()}
-            >
-              {setupBusy ? '正在完成' : '完成首次设置'}
-            </button>
-          </div>
-        </section>
-      )}
-
       <section className="settings-section settings-section--first" aria-labelledby="ai-settings-title">
         <div className="settings-section__heading"><Bot size={19} aria-hidden="true" /><h2 id="ai-settings-title">模型连接</h2></div>
         <p className="settings-section__description">连接后，学习流程会调用相应模型完成评阅、练习、批改和笔记整理。账号、模型与可用状态见下方。</p>
@@ -879,6 +880,33 @@ export function SettingsPage() {
             <Library size={16} />打开材料库
           </button>
         </div>
+        <div className="settings-action-row">
+          <div>
+            <strong><Database size={15} aria-hidden="true" />混合检索</strong>
+            <span>
+              全文检索始终启用。语义检索使用本机多语言模型（{materialSearch.model_size}），
+              {materialSearch.semantic_enabled && materialSearch.model_ready
+                ? '当前已启用。'
+                : materialSearch.semantic_enabled
+                  ? '模型文件缺失，需要重新下载后才会启用。'
+                  : '仅在确认后下载并启用。'}
+            </span>
+            {materialSearchError && <span className="inline-error" role="alert">{materialSearchError}</span>}
+          </div>
+          <button
+            className="secondary-button"
+            type="button"
+            disabled={materialSearchBusy}
+            onClick={() => void toggleSemanticSearch()}
+          >
+            <Database size={16} aria-hidden="true" />
+            {materialSearchBusy
+              ? '正在准备'
+              : materialSearch.semantic_enabled && materialSearch.model_ready
+                ? '关闭语义检索'
+                : materialSearch.semantic_enabled ? '重新下载模型' : '下载并启用'}
+          </button>
+        </div>
       </section>
 
       <section className="settings-section" aria-labelledby="appearance-settings-title">
@@ -988,19 +1016,40 @@ export function SettingsPage() {
         </div>
       </section>
 
-      <section className="settings-section" aria-labelledby="service-settings-title">
-        <div className="settings-section__heading"><Power size={19} aria-hidden="true" /><h2 id="service-settings-title">本地服务</h2></div>
-        <div className="settings-action-row">
+      <section
+        id="local-service"
+        className="settings-section"
+        aria-labelledby="service-settings-title"
+      >
+        <div className="settings-section__heading"><Power size={19} aria-hidden="true" /><h2 id="service-settings-title">本地服务与运行状态</h2></div>
+        <div className="settings-action-row service-status-row" aria-live="polite">
           <div>
-            <strong>{desktopLaunch ? '桌面启动器正在管理服务' : '当前由诊断终端运行'}</strong>
-            <span>{desktopLaunch ? '关闭后，下次双击 Lumina 图标即可重新启动。' : '请在启动服务的终端中按 Ctrl+C 停止。'}</span>
+            <strong>
+              {routeData.settings
+                ? <CircleCheck className="service-status-icon service-status-icon--online" size={17} aria-hidden="true" />
+                : <CircleAlert className="service-status-icon service-status-icon--offline" size={17} aria-hidden="true" />}
+              {routeData.settings ? 'Lumina 本地服务已连接' : 'Lumina 本地服务未连接'}
+            </strong>
+            <span>
+              {routeData.settings
+                ? `v${routeData.settings.service_version || '版本暂不可用'} · 本地数据服务运行正常`
+                : '请重新启动 Lumina 后刷新此页面。'}
+            </span>
           </div>
-          {desktopLaunch && (
-            <button className="secondary-button" type="button" onClick={() => setShutdownOpen(true)}>
-              <Power size={16} aria-hidden="true" />关闭服务
-            </button>
-          )}
         </div>
+        {routeData.settings && (
+          <div className="settings-action-row">
+            <div>
+              <strong>{desktopLaunch ? '桌面启动器正在管理服务' : '当前由诊断终端运行'}</strong>
+              <span>{desktopLaunch ? '关闭后，下次双击 Lumina 图标即可重新启动。' : '请在启动服务的终端中按 Ctrl+C 停止。'}</span>
+            </div>
+            {desktopLaunch && (
+              <button className="secondary-button" type="button" onClick={() => setShutdownOpen(true)}>
+                <Power size={16} aria-hidden="true" />关闭服务
+              </button>
+            )}
+          </div>
+        )}
       </section>
 
       <ConfirmDialog

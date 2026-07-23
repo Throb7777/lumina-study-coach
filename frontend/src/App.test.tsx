@@ -188,45 +188,71 @@ afterEach(() => {
 })
 
 describe('App', () => {
-  it('shows the Lumina brand while preserving the backend service identity', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: 'ok',
-        service: 'learning-flow-coach-api',
-        version: '0.1.0',
-      }),
-    }))
+  it('shows the Lumina service state inside settings without a separate navigation item', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/settings') {
+        return jsonResponse({
+          obsidian_vault_path: '',
+          learner_profile: '',
+          service_version: '0.1.0',
+          desktop_launch: true,
+        })
+      }
+      if (input === '/api/settings/obsidian-vaults') {
+        return jsonResponse({ vaults: [], browse_supported: true })
+      }
+      if (input === '/api/ai/provider-snapshot') return jsonResponse(providerSnapshot())
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
-    renderApp(['/status'])
+    renderApp(['/settings'])
 
-    expect(await screen.findByText('Lumina 本地服务 · v0.1.0')).toBeInTheDocument()
+    expect(await screen.findByText('Lumina 本地服务已连接')).toBeInTheDocument()
+    expect(screen.getByText('v0.1.0 · 本地数据服务运行正常')).toBeInTheDocument()
     expect(screen.getByText('Lumina')).toBeInTheDocument()
-    expect(screen.queryByText('学习流程教练')).not.toBeInTheDocument()
+    expect(screen.queryByRole('link', { name: '运行状态' })).not.toBeInTheDocument()
   })
 
-  it('shows the connected state when the health endpoint succeeds', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
-      ok: true,
-      json: async () => ({
-        status: 'ok',
-        service: 'learning-flow-coach-api',
-        version: '0.1.0',
-      }),
-    }))
+  it('redirects the old status route to the local service section in settings', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/settings') {
+        return jsonResponse({
+          obsidian_vault_path: '',
+          learner_profile: '',
+          service_version: '0.1.0',
+          desktop_launch: false,
+        })
+      }
+      if (input === '/api/settings/obsidian-vaults') {
+        return jsonResponse({ vaults: [], browse_supported: true })
+      }
+      if (input === '/api/ai/provider-snapshot') return jsonResponse(providerSnapshot())
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
-    renderApp(['/status'])
+    const { router } = renderApp(['/status'])
 
-    expect(await screen.findByText('后端已连接')).toBeInTheDocument()
-    expect(screen.getByText('Lumina 本地服务 · v0.1.0')).toBeInTheDocument()
+    expect(await screen.findByText('Lumina 本地服务已连接')).toBeInTheDocument()
+    expect(router.state.location.pathname).toBe('/settings')
+    expect(router.state.location.hash).toBe('#local-service')
   })
 
-  it('shows the disconnected state when the health endpoint fails', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new Error('unavailable')))
+  it('shows the disconnected state when settings cannot reach the local service', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/settings') return jsonResponse({ detail: 'unavailable' }, 503)
+      if (input === '/api/settings/obsidian-vaults') {
+        return jsonResponse({ vaults: [], browse_supported: true })
+      }
+      if (input === '/api/ai/provider-snapshot') return jsonResponse(providerSnapshot())
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
 
-    renderApp(['/status'])
+    renderApp(['/settings'])
 
-    expect(await screen.findByText('后端未连接')).toBeInTheDocument()
+    expect(await screen.findByText('Lumina 本地服务未连接')).toBeInTheDocument()
   })
 
   it('opens the bundled example without API calls or writable controls', async () => {
@@ -236,7 +262,11 @@ describe('App', () => {
 
     renderApp(['/example'])
 
-    expect(await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })).toBeInTheDocument()
+    expect(await screen.findByRole(
+      'heading',
+      { name: 'MIT 18.06 线性代数示例' },
+      { timeout: 5000 },
+    )).toBeInTheDocument()
     expect(screen.getByText('只读完整示例')).toBeInTheDocument()
     expect(screen.getByText('6 / 6 已完成')).toBeInTheDocument()
     expect(fetchMock).not.toHaveBeenCalled()
@@ -254,31 +284,51 @@ describe('App', () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it('hides the bundled example only after two confirmations', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      throw new Error(`Unexpected request: ${input}`)
+    }))
+    const user = userEvent.setup()
+    const { router } = renderApp(['/courses'])
+
+    expect(await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '删除示例课程' }))
+    expect(screen.getByRole('dialog', { name: '删除示例课程？' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '继续删除' }))
+    expect(screen.getByRole('dialog', { name: '再次确认删除' })).toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '确认删除' }))
+
+    expect(screen.queryByRole('heading', { name: 'MIT 18.06 线性代数示例' })).not.toBeInTheDocument()
+    expect(screen.getByText('还没有课程')).toBeInTheDocument()
+    expect(localStorage.getItem('lumina.example-dismissed')).toBe('true')
+
+    await router.navigate('/example')
+    await waitFor(() => expect(router.state.location.pathname).toBe('/courses'))
+  })
+
   it('creates a course from the course list', async () => {
-    const fetchMock = vi.fn()
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 200,
-        json: async () => [],
-      })
-      .mockResolvedValueOnce({
-        ok: true,
-        status: 201,
-        json: async () => ({
+    const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      if (input === '/api/courses' && init?.method === 'POST') {
+        return jsonResponse({
           id: 1,
           name: '概率论',
           description: '',
           learning_goal: '',
-        }),
-      })
-      .mockImplementationOnce(() => jsonResponse({ ...courseDetail, chapters: [] }))
+        }, 201)
+      }
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/courses/1') return jsonResponse({ ...courseDetail, chapters: [] })
+      throw new Error(`Unexpected request: ${input}`)
+    })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     const { router } = renderApp(['/courses'])
 
-    expect(await screen.findByText('还没有课程')).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '先看完整示例' })).toHaveAttribute('href', '/example')
+    expect(await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '创建课程' }))
     await user.type(screen.getByLabelText('课程名称'), '概率论')
     const createDialog = screen.getByRole('dialog', { name: '创建课程' })
@@ -288,24 +338,28 @@ describe('App', () => {
     await user.click(screen.getByRole('button', { name: '创建并进入' }))
 
     await waitFor(() => {
-      expect(fetchMock).toHaveBeenCalledTimes(3)
+      expect(fetchMock).toHaveBeenCalledTimes(4)
       expect(router.state.location.pathname).toBe('/courses/1')
       expect(router.state.navigation.state).toBe('idle')
     }, { timeout: 3000 })
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/courses/1', expect.objectContaining({ signal: expect.any(AbortSignal) }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/courses/1', expect.objectContaining({ signal: expect.any(AbortSignal) }))
     await act(async () => {
       await new Promise((resolve) => window.setTimeout(resolve, 200))
     })
     expect(screen.getByRole('heading', { name: '概率论' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/courses', expect.objectContaining({ method: 'POST' }))
+    expect(fetchMock).toHaveBeenCalledWith('/api/courses', expect.objectContaining({ method: 'POST' }))
   })
 
   it('collapses the sidebar and persists the preference', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse([])))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      throw new Error(`Unexpected request: ${input}`)
+    }))
     const user = userEvent.setup()
 
     const { container } = renderApp(['/courses'])
-    await screen.findByText('还没有课程')
+    await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })
     expect(container.querySelector('.app-shell')).not.toHaveClass('app-shell--sidebar-collapsed')
 
     await user.click(screen.getByRole('button', { name: '收起侧栏' }))
@@ -329,42 +383,54 @@ describe('App', () => {
         json: async () => courseDetail,
       })
     })
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(() => jsonResponse(courses))
-      .mockImplementationOnce(() => pendingCourseRequest)
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse(courses)
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      if (input === '/api/courses/1') return pendingCourseRequest
+      throw new Error(`Unexpected request: ${input}`)
+    })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     renderApp(['/courses'])
 
     await user.click(await screen.findByRole('heading', { name: '概率论' }))
-    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
     expect(screen.getByRole('heading', { name: '学习课程' })).toBeInTheDocument()
     expect(screen.queryByLabelText('正在读取课程')).not.toBeInTheDocument()
 
     await act(async () => resolveCourseRequest?.())
     expect(await screen.findByRole('heading', { name: '概率论' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
   })
 
-  it('returns to the last course workspace route after visiting status', async () => {
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(() => jsonResponse(courseDetail))
-      .mockImplementationOnce(() => jsonResponse({
-        status: 'ok',
-        service: 'learning-flow-coach-api',
-        version: '0.1.0',
-      }))
-      .mockImplementationOnce(() => jsonResponse(courseDetail))
-      .mockImplementationOnce(() => jsonResponse([]))
+  it('returns to the last course workspace route after visiting settings', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses/1') return jsonResponse(courseDetail)
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      if (input === '/api/settings') {
+        return jsonResponse({
+          obsidian_vault_path: '',
+          learner_profile: '',
+          service_version: '0.1.0',
+          desktop_launch: false,
+        })
+      }
+      if (input === '/api/settings/obsidian-vaults') {
+        return jsonResponse({ vaults: [], browse_supported: true })
+      }
+      if (input === '/api/ai/provider-snapshot') return jsonResponse(providerSnapshot())
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     renderApp(['/courses/1'])
 
     expect(await screen.findByRole('heading', { name: '概率论' })).toBeInTheDocument()
-    await user.click(screen.getByRole('link', { name: '运行状态' }))
-    expect(await screen.findByText('后端已连接')).toBeInTheDocument()
+    await user.click(screen.getByRole('link', { name: '设置' }))
+    expect(await screen.findByText('Lumina 本地服务已连接')).toBeInTheDocument()
     const courseLink = screen.getByRole('link', { name: '课程' })
     expect(courseLink).toHaveAttribute('href', '/courses/1')
     expect(courseLink).toHaveAttribute('title', '返回上次课程位置')
@@ -379,14 +445,19 @@ describe('App', () => {
     await user.click(courseHomeLink)
 
     expect(await screen.findByRole('heading', { name: '学习课程' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(4)
+    expect(fetchMock).toHaveBeenCalledWith('/api/settings', expect.any(Object))
+    expect(fetchMock).toHaveBeenCalledWith('/api/courses', expect.any(Object))
   })
 
   it('does not request browser confirmation when the current page is clean', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse([])))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      throw new Error(`Unexpected request: ${input}`)
+    }))
 
     renderApp(['/courses'])
-    await screen.findByText('还没有课程')
+    await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })
     const event = new Event('beforeunload', { cancelable: true })
 
     expect(window.dispatchEvent(event)).toBe(true)
@@ -394,13 +465,16 @@ describe('App', () => {
   })
 
   it('protects and restores an unfinished course creation dialog', async () => {
-    const fetchMock = vi.fn()
-      .mockImplementationOnce(() => jsonResponse([]))
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      throw new Error(`Unexpected request: ${input}`)
+    })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     const firstRender = renderApp(['/courses'])
-    await screen.findByText('还没有课程')
+    await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })
     await user.click(screen.getByRole('button', { name: '创建课程' }))
     await user.type(screen.getByLabelText('课程名称'), '未保存的概率论课程')
 
@@ -491,7 +565,11 @@ describe('App', () => {
         in_progress_sections: 0,
       },
     ]
-    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse(courses)))
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse(courses)
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      throw new Error(`Unexpected request: ${input}`)
+    }))
     const user = userEvent.setup()
 
     renderApp(['/courses'])
@@ -937,7 +1015,56 @@ describe('App', () => {
     expect(container.querySelector('.exercise-option-content')).not.toHaveTextContent('$')
   })
 
-  it('refreshes the completed review node after grading a structured exercise', async () => {
+  it('collapses structured practice and opens review after completing the exercise', async () => {
+    const answeredItems = structuredExerciseItems.map((item) => ({
+      ...item,
+      response: {
+        ...item.response,
+        answer_markdown: item.options.length ? '' : `Answer ${item.position}`,
+        selected_options: item.options.length ? ['A'] : [],
+        status: 'draft',
+      },
+    }))
+    const answeredExercise = {
+      ...structuredExercise,
+      items: answeredItems,
+    }
+    const submittedExercise = {
+      ...answeredExercise,
+      status: 'submitted',
+      items: answeredItems.map((item) => ({
+        ...item,
+        response: { ...item.response, status: 'submitted' },
+      })),
+    }
+    const completedPractice = { ...workflowNodes[3], status: 'completed' }
+    const refreshedRecord = {
+      ...dailyRecord,
+      workflow_nodes: workflowNodes.map((node) => (
+        node.node_key === 'practice' ? completedPractice : node
+      )),
+      exercises: [submittedExercise],
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({ ...dailyRecord, exercises: [answeredExercise] }))
+      .mockImplementationOnce(() => jsonResponse(submittedExercise))
+      .mockImplementationOnce(() => jsonResponse(refreshedRecord))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    await user.click(await screen.findByRole('button', { name: '展开练习与推导' }))
+    await user.click(screen.getByRole('button', { name: '完成今日练习' }))
+
+    expect(await screen.findByRole('button', { name: '展开练习与推导' })).toHaveTextContent('已完成')
+    expect(screen.getByRole('button', { name: '收起批改与纠错' })).toHaveAttribute('aria-expanded', 'true')
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/exercises/2/complete', expect.objectContaining({
+      method: 'POST',
+    }))
+  })
+
+  it('keeps generated grading visible until the user completes the review node', async () => {
     const submittedItems = structuredExerciseItems.map((item) => ({
       ...item,
       response: {
@@ -957,16 +1084,17 @@ describe('App', () => {
       status: 'graded',
       ai_feedback: '整套练习总结',
     }
-    const completedReview = { ...workflowNodes[4], status: 'completed' }
     const refreshedRecord = {
       ...dailyRecord,
-      workflow_nodes: workflowNodes.map((node) => node.node_key === 'review' ? completedReview : node),
+      workflow_nodes: workflowNodes,
       exercises: [gradedExercise],
     }
+    const completedReview = { ...workflowNodes[4], status: 'completed' }
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => jsonResponse({ ...dailyRecord, exercises: [submittedExercise] }))
       .mockImplementationOnce(() => jsonResponse(gradedExercise))
       .mockImplementationOnce(() => jsonResponse(refreshedRecord))
+      .mockImplementationOnce(() => jsonResponse(completedReview))
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
@@ -975,12 +1103,21 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: '展开批改与纠错' }))
     await user.click(screen.getByRole('button', { name: '批改答案' }))
 
+    expect(await screen.findByRole('button', { name: '收起批改与纠错' })).toHaveTextContent('未完成')
+    expect(screen.getByText('逐题复核 1/12')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '展开今日收尾' })).toHaveAttribute('aria-expanded', 'false')
+    await user.click(screen.getByRole('button', { name: '完成批改与纠错' }))
+
     expect(await screen.findByRole('button', { name: '展开批改与纠错' })).toHaveTextContent('已完成')
     expect(screen.getByRole('button', { name: '收起今日收尾' })).toHaveAttribute('aria-expanded', 'true')
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/exercises/2/ai-grade', expect.objectContaining({
       method: 'POST',
     }))
     expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/daily-records/1', expect.any(Object))
+    expect(fetchMock).toHaveBeenNthCalledWith(4, '/api/workflow-nodes/5', expect.objectContaining({
+      method: 'PATCH',
+      body: JSON.stringify({ status: 'completed' }),
+    }))
   })
 
   it('starts mistake organization from the first incorrect structured item', async () => {
@@ -1305,6 +1442,7 @@ describe('App', () => {
     const completedRecord = {
       ...dailyRecord,
       is_completed: true,
+      context_summary: '# 今日学习摘要\n\n- 已完成本次学习。',
       workflow_nodes: workflowNodes.map((node) =>
         node.node_key === 'daily_close' ? { ...node, status: 'completed' } : node
       ),
@@ -1326,6 +1464,9 @@ describe('App', () => {
     await user.click(within(dialog).getByRole('button', { name: '仍然结束今天' }))
 
     expect(await screen.findByText('今日学习已完成')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '收起今日收尾' })).toHaveAttribute('aria-expanded', 'true')
+    expect(screen.getByRole('heading', { name: '今日学习摘要' })).toBeInTheDocument()
+    expect(screen.getByText('这个小节已经学完了吗？')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/daily-records/1/complete', expect.objectContaining({
       method: 'POST',
     }))
@@ -1370,47 +1511,76 @@ describe('App', () => {
     }))
   })
 
-  it('completes the first-run setup from the existing settings page', async () => {
+  it('welcomes a first-run user from the course home and enters the app', async () => {
     const fetchMock = vi.fn().mockImplementation((input: string) => {
-      if (input === '/api/settings') {
-        return jsonResponse({
-          obsidian_vault_path: '',
-          learner_profile: '',
-          desktop_launch: true,
-          setup_pending: true,
-        })
-      }
-      if (input === '/api/settings/obsidian-vaults') {
-        return jsonResponse({ vaults: [], browse_supported: true })
-      }
-      if (input === '/api/ai/provider-snapshot') {
-        return jsonResponse(providerSnapshot())
-      }
-      if (input === '/api/settings/setup-complete') {
-        return jsonResponse({
-          obsidian_vault_path: '',
-          learner_profile: '',
-          desktop_launch: true,
-          setup_pending: false,
-        })
-      }
       if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: true })
+      if (input === '/api/onboarding/complete') return jsonResponse({ pending: false })
       return jsonResponse({ detail: 'not found' }, 404)
     })
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
-    renderApp(['/settings?setup=1'])
+    renderApp(['/courses'])
 
-    expect(await screen.findByText('首次使用 Lumina')).toBeInTheDocument()
-    expect(await screen.findByRole('heading', { name: '完成本机设置' })).toBeInTheDocument()
-    expect(screen.getByRole('link', { name: '查看完整示例' })).toHaveAttribute('href', '/example')
-    await user.click(screen.getByRole('button', { name: '完成首次设置' }))
+    const dialog = await screen.findByRole('dialog', { name: '欢迎使用 Lumina' })
+    expect(within(dialog).getByText('从课程和小节开始，按清晰的学习流程持续推进。')).toBeInTheDocument()
+    fireEvent.mouseDown(dialog)
+    expect(dialog).toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '开始使用' }))
 
+    await waitFor(() => expect(screen.queryByRole('dialog', { name: '欢迎使用 Lumina' })).not.toBeInTheDocument())
     expect(await screen.findByRole('heading', { name: '学习课程' })).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledWith('/api/settings/setup-complete', expect.objectContaining({
+    expect(fetchMock).toHaveBeenCalledWith('/api/onboarding/complete', expect.objectContaining({
       method: 'POST',
     }))
+  })
+
+  it('keeps the first-run welcome open when completion fails', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: true })
+      if (input === '/api/onboarding/complete') {
+        return jsonResponse({ detail: '暂时无法保存首次使用状态' }, 503)
+      }
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/courses'])
+
+    const dialog = await screen.findByRole('dialog', { name: '欢迎使用 Lumina' })
+    await user.click(within(dialog).getByRole('button', { name: '开始使用' }))
+
+    expect(await within(dialog).findByRole('alert')).toHaveTextContent('暂时无法保存首次使用状态')
+    expect(dialog).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '开始使用' })).toBeEnabled()
+  })
+
+  it('does not expose first-run controls on the settings page', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/settings') {
+        return jsonResponse({
+          obsidian_vault_path: '',
+          learner_profile: '',
+          service_version: '0.1.0',
+          desktop_launch: true,
+        })
+      }
+      if (input === '/api/settings/obsidian-vaults') {
+        return jsonResponse({ vaults: [], browse_supported: true })
+      }
+      if (input === '/api/ai/provider-snapshot') return jsonResponse(providerSnapshot())
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    renderApp(['/settings?setup=1'])
+
+    expect(await screen.findByRole('heading', { name: '设置' })).toBeInTheDocument()
+    expect(screen.queryByText('首次使用 Lumina')).not.toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '完成首次设置' })).not.toBeInTheDocument()
   })
 
   it('falls back to the previous provider endpoints during a rolling restart', async () => {
@@ -1456,7 +1626,6 @@ describe('App', () => {
           obsidian_vault_path: '',
           learner_profile: '',
           desktop_launch: true,
-          setup_pending: false,
         })
       }
       if (input === '/api/settings/obsidian-vaults') {

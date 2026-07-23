@@ -11,9 +11,10 @@ import {
   Link2,
   LockKeyhole,
 } from 'lucide-react'
-import { Link } from 'react-router-dom'
+import { Link, Navigate } from 'react-router-dom'
 import { MarkdownContent } from '../components/MarkdownContent'
 import exampleJson from '../data/example-course.json?raw'
+import { isBundledExampleVisible } from '../examplePreference'
 
 type ExampleView = 'workflow' | 'practice' | 'note'
 
@@ -243,6 +244,7 @@ function NoteExample() {
 
 export function ExamplePage() {
   const [view, setView] = useState<ExampleView>('workflow')
+  if (!isBundledExampleVisible()) return <Navigate to="/courses" replace />
 
   return (
     <main className="content content--workspace example-page">

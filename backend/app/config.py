@@ -31,7 +31,7 @@ class Settings(BaseSettings):
 
     @property
     def material_dir(self) -> Path:
-        return PROJECT_ROOT / "runtime-data" / "materials"
+        return self.runtime_data_dir / "materials"
 
     @property
     def log_dir(self) -> Path:
