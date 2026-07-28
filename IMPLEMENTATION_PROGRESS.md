@@ -4,10 +4,10 @@
 
 ## 当前阶段
 
-- 项目阶段：第一版阶段 32，Lumina v0.1.1 Public Preview 发布候选已完成本地验收。
-- 当前目标：发布模型连接状态兼容修复，并核验远端仓库、CI 与 Release 资产。
+- 项目阶段：第一版阶段 32，Lumina v0.1.1 Public Preview 已发布。
+- 当前目标：收集 v0.1.1 的模型连接、安装升级和实际学习反馈。
 - 最后更新时间：2026-07-28。
-- 当前结论：v0.1.1 已完成连接状态修复、版本元数据同步、干净依赖恢复和本地发布前检查；正式数据库与账号授权保留，本轮日志、缓存、测试数据和构建残留已清理。远端提交、标签、CI 和 Release 资产尚待完成。
+- 当前结论：远端 `main`、`v0.1.1` 标签、GitHub Actions 和预发布 Release 已完成验收，5 个发布资产与本地 SHA-256 一致。本机已升级到 v0.1.1，Codex 与 Antigravity 均保持连接；正式数据库和授权保留，本轮日志、缓存、测试数据与构建残留已清理。
 
 ## 功能状态
 
@@ -32,20 +32,20 @@
 | 学习记忆 | `DONE` | 课程页可编辑用户维护的课程记忆，并查看独立自动课程脉络、章节记忆和小节记忆；每日完成由一次 Codex 调用生成紧凑摘要并同时更新小节和章节记忆，手动整理作为修复入口 | 三层记忆 API、AI 每日摘要、全部学习来源聚合、课程概览不覆盖、结构化生成和持久化测试通过 |
 | 设置 | `DONE` | 模型连接、Vault、字号、材料库和混合检索保持不变；独立运行状态已合并为底部“本地服务与运行状态”。设置页不再承担首次使用流程，旧 `?setup=1` 不产生特殊界面 | 设置服务版本、在线状态、旧路由锚点、旧首次设置入口移除、桌面与 390px 无溢出和控制台零错误通过 |
 | Windows 安装与启动 | `DONE` | 安装包命名为 `install_Lumina-版本号.exe`，内部卸载组件位于 `uninstall_Lumina`；运行中卸载先等待 PID 对应服务完全退出，再精准删除程序文件并保留用户文件和默认学习数据 | QA 运行中卸载约 3.11 秒完成，端口、`Lumina.exe`、`_internal` 和纯程序目录全部清理；用户文件边界、默认数据保留及生产安装器编译通过 |
-| 公开发布 | `DONE` | `Throb7777/lumina-study-coach` 已公开，`v0.1.0` Public Preview 包含安装器、源码 ZIP、发布清单、CycloneDX SBOM 和 SHA-256 文件 | `main`、标签和 Release 目标均指向 `a31a2e2`；GitHub Actions 前后端 job 成功，5 个远端资产摘要与本地一致 |
+| 公开发布 | `DONE` | `Throb7777/lumina-study-coach` 已公开，`v0.1.1` Public Preview 包含安装器、源码 ZIP、发布清单、CycloneDX SBOM 和 SHA-256 文件 | 发布标签指向 `3c68331`；GitHub Actions `30324668171` 前后端 job 成功，5 个远端资产摘要与本地一致 |
 
 ## 当前正在进行
 
-- 当前任务：v0.1.1 发布候选已完成本地检查，准备提交、构建资产并发布。
-- 最近完成：清除本轮安装日志、回滚包、失败构建、测试环境、浏览器状态、Codex 运行数据库和插件缓存；保留正式 SQLite 数据库、Codex 授权和安装身份。清理后重新启动验证 Codex 与 Antigravity 均保持 `connected`。
+- 当前任务：v0.1.1 模型连接修复版已完成提交、推送、标签和预发布 Release。
+- 最近完成：远端 CI 两个 job 全部成功，5 个 Release 资产上传完成且摘要一致；本机安装 v0.1.1 后健康接口返回正确版本，Codex 与 Antigravity 均保持 `connected`。最终再次清除安装日志、回滚包、测试环境、Codex 状态数据库和插件缓存。
 - 本轮范围：代码只修改模型连接状态读取及其回归测试；发布元数据提升到 `0.1.1`，并修复 npm 11 干净安装所需的可选传递依赖锁。未修改数据库 schema、学习流程、正式学习数据、正式材料、正式 Obsidian Vault、模型首选项或账号凭据。
-- 验收结论：前端 88 项、后端 94 项、启动器 13 项测试通过；ESLint、TypeScript、前后端 Ruff、Vite 生产构建、Alembic 空库升级与漂移、uv 锁、PowerShell 解析、发布元数据和 `git diff --check` 均通过。
+- 验收结论：前端 88 项、后端 94 项、启动器 13 项测试通过；ESLint、TypeScript、前后端 Ruff、Vite 生产构建、Alembic 空库升级与漂移、uv 锁、PowerShell 解析、发布元数据和 `git diff --check` 均通过。隔离 EXE 2.14 秒启动并正常退出，Windows Defender 未检测到威胁。
 
 ## 下一步
 
-1. 通过 GitHub Issues 收集 v0.1.0 的安装、材料解析、AI 连接和 Obsidian 实际使用反馈。
-2. 完成 v0.1.1 的提交、标签、GitHub Actions 和预发布 Release 资产核验。
-3. 后续公开版本优先配置可信 Windows 代码签名，消除 SmartScreen 未知发布者提示。
+1. 通过 GitHub Issues 收集 v0.1.1 的安装、材料解析、AI 连接和 Obsidian 实际使用反馈。
+2. 后续公开版本优先配置可信 Windows 代码签名，消除 SmartScreen 未知发布者提示。
+3. 只在确认真实需求或缺陷后进入下一阶段，不扩大第一版范围。
 
 ## 阻塞与待确认
 
@@ -202,6 +202,7 @@
 - 验证结果：后端 `94 passed`，Ruff 输出 `All checks passed!`；前端 `npm run check` 通过 ESLint、TypeScript、88 项 Vitest 和 Vite `8.1.4` 生产构建。真实快照约 1.05 秒返回，设置页显示“连接 Codex”“连接 Antigravity”、CLI `0.145.0`/`1.1.8` 和简短未登录状态，控制台 0 error/0 warning。
 - 发布整理：版本元数据、README、测试期望和 CHANGELOG 提升为 `0.1.1`；npm 11 锁文件补齐 WASI 可选传递依赖并修复 `brace-expansion`。清理后的真实应用验证两个提供方均已连接，但未调用付费模型生成。
 - 清理结果：删除本轮工作区 CLI 备份、安装脚本和日志、失败安装残留、依赖缓存、测试数据库、浏览器状态、应用日志、安装回滚包及 Codex 可重建状态/插件缓存；保留正式学习数据库、Codex `auth.json`、安装身份和 Antigravity 授权。
+- 远端发布：提交 `3c683314d334fc4897dbf6b63c7f140f01c80dd8` 已推送到 `main`，`v0.1.1` 标签指向该提交；GitHub Actions `30324668171` 的 frontend 和 backend-and-launcher 均成功。预发布 Release 上传 5 个资产，安装器 SHA-256 为 `BE859AC0C1593862598D79D00ADCF39C00BDA2C28B55A446A29B92E30A18C27C`，源码 ZIP 为 `C7CD7E58C6071A6BADB574A7C3D8ECCBE8BD49485E3CE3D347DD5D0524807114`。
 
 ### 2026-07-16 - 修正学习流程生成反馈、材料范围和旧批改格式
 
