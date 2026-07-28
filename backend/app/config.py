@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "learning-flow-coach-api"
-    app_version: str = "0.1.0"
+    app_version: str = "0.1.1"
     host: str = "127.0.0.1"
     port: int = 8000
     static_dir: Path = PROJECT_ROOT / "frontend" / "dist"

@@ -2,6 +2,23 @@
 
 All notable public changes to Lumina are documented in this file.
 
+## [0.1.1] - 2026-07-28
+
+### Fixed
+
+- Prevent model connection status from remaining in a loading state when a
+  Codex or Antigravity probe stalls.
+- Clean up cancelled Codex App Server requests and partially initialized
+  processes.
+- Replace verbose Antigravity login diagnostics with a concise connection
+  prompt.
+
+### Changed
+
+- Probe provider status and model options concurrently with bounded backend and
+  frontend timeouts.
+- Support the current official npm Codex platform-package executable layout.
+
 ## [0.1.0] - 2026-07-23
 
 ### Added
@@ -21,4 +38,5 @@ All notable public changes to Lumina are documented in this file.
 - The application interface is currently Simplified Chinese.
 - The Windows installer is not code-signed yet.
 
+[0.1.1]: https://github.com/Throb7777/lumina-study-coach/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.0

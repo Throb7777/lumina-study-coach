@@ -14,11 +14,13 @@ from app.ai_providers import (
     AiProviderError,
     AiProviderResult,
     AiProviderStatus,
+    AiService,
     AntigravityCli,
     CodexAppServer,
     LoginAttempt,
     TurnState,
     build_subprocess_environment,
+    friendly_antigravity_error,
     friendly_codex_runtime_error,
     friendly_provider_launch_error,
     resolve_codex_executable,
@@ -377,6 +379,28 @@ def test_provider_snapshot_combines_status_and_options(
         "codex",
         "gemini",
     ]
+
+
+def test_provider_status_probe_timeout_returns_an_error_state(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AiService(tmp_path / "codex-home", tmp_path / "workspace")
+    service.codex.executable = "codex"
+
+    async def slow_codex_status(*args) -> AiProviderStatus:
+        del args
+        await asyncio.sleep(1)
+        raise AssertionError("probe should have timed out")
+
+    monkeypatch.setattr(service, "_codex_status", slow_codex_status)
+    monkeypatch.setattr(ai_providers_module, "PROVIDER_PROBE_TIMEOUT_SECONDS", 0.01)
+
+    providers = asyncio.run(service.statuses(gemini_enabled=False))
+
+    assert providers[0].state == "error"
+    assert providers[0].connected is False
+    assert providers[0].detail == "Codex 连接状态读取超时，请重试"
 
 
 def test_model_list_probes_are_reused_for_a_short_refresh_window(
@@ -806,6 +830,18 @@ def test_antigravity_account_parser_ignores_invalid_diagnostics() -> None:
         )
         == ""
     )
+
+
+def test_antigravity_login_error_hides_internal_language_server_logs() -> None:
+    diagnostics = "\n".join(
+        [
+            "I0000 server.go:1424 Starting language server process",
+            "E0000 error getting token source: You are not logged into Antigravity.",
+            "I0000 server.go:2572 Language server shutting down",
+        ]
+    )
+
+    assert friendly_antigravity_error(diagnostics) == "等待完成 Antigravity 登录"
 
 
 def test_antigravity_status_reads_account_from_temporary_cli_log(

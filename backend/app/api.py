@@ -36,7 +36,12 @@ from app.ai_preferences import (
     gemini_preference,
     save_preference,
 )
-from app.ai_providers import AiModelOption, AiProviderError, AiService
+from app.ai_providers import (
+    PROVIDER_PROBE_TIMEOUT_SECONDS,
+    AiModelOption,
+    AiProviderError,
+    AiService,
+)
 from app.ai_workflows import (
     DAILY_SUMMARY_OUTPUT_SCHEMA,
     GRADING_OUTPUT_SCHEMA,
@@ -612,9 +617,15 @@ async def provider_options_payload(
         default_model = CODEX_DEFAULT_MODEL
         default_effort = CODEX_DEFAULT_REASONING_EFFORT
         try:
-            entries = await ai_service.codex.model_entries()
+            entries = await asyncio.wait_for(
+                ai_service.codex.model_entries(),
+                timeout=PROVIDER_PROBE_TIMEOUT_SECONDS,
+            )
             models = ai_service.codex.model_options(entries)
             error = ""
+        except TimeoutError:
+            models = []
+            error = "Codex 模型列表读取超时，请重试"
         except AiProviderError as request_error:
             models = []
             error = str(request_error)
@@ -623,9 +634,15 @@ async def provider_options_payload(
         default_model = GEMINI_DEFAULT_MODEL
         default_effort = GEMINI_DEFAULT_REASONING_EFFORT
         try:
-            models = await ai_service.gemini.model_options()
+            models = await asyncio.wait_for(
+                ai_service.gemini.model_options(),
+                timeout=PROVIDER_PROBE_TIMEOUT_SECONDS,
+            )
             error = ""
-        except (AiProviderError, OSError, TimeoutError) as request_error:
+        except TimeoutError:
+            models = []
+            error = "Antigravity 模型列表读取超时，请重试"
+        except (AiProviderError, OSError) as request_error:
             models = []
             error = str(request_error)
     return AiProviderOptionsRead(
@@ -644,10 +661,11 @@ async def get_ai_provider_options(
     session: SessionDependency,
     ai_service: AiServiceDependency,
 ) -> list[AiProviderOptionsRead]:
-    return [
-        await provider_options_payload("codex", session, ai_service),
-        await provider_options_payload("gemini", session, ai_service),
-    ]
+    codex, gemini = await asyncio.gather(
+        provider_options_payload("codex", session, ai_service),
+        provider_options_payload("gemini", session, ai_service),
+    )
+    return [codex, gemini]
 
 
 @router.get("/ai/provider-snapshot", response_model=AiProviderSnapshotRead)
@@ -655,8 +673,10 @@ async def get_ai_provider_snapshot(
     session: SessionDependency,
     ai_service: AiServiceDependency,
 ) -> AiProviderSnapshotRead:
-    providers = await get_ai_providers(session, ai_service)
-    options = await get_ai_provider_options(session, ai_service)
+    providers, options = await asyncio.gather(
+        get_ai_providers(session, ai_service),
+        get_ai_provider_options(session, ai_service),
+    )
     return AiProviderSnapshotRead(providers=providers, options=options)
 
 

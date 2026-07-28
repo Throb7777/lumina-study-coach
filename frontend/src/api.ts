@@ -561,6 +561,8 @@ export class ApiError extends Error {
   }
 }
 
+const AI_PROVIDER_SNAPSHOT_TIMEOUT_MS = 15_000
+
 async function request<T>(path: string, options?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...options,
@@ -579,6 +581,37 @@ async function request<T>(path: string, options?: RequestInit): Promise<T> {
     return undefined as T
   }
   return response.json() as Promise<T>
+}
+
+async function withRequestTimeout<T>(
+  operation: (signal: AbortSignal) => Promise<T>,
+  signal: AbortSignal | undefined,
+  timeoutMs: number,
+  timeoutMessage: string,
+): Promise<T> {
+  const controller = new AbortController()
+  let timedOut = false
+  const abortFromCaller = () => controller.abort(signal?.reason)
+  if (signal?.aborted) {
+    abortFromCaller()
+  } else {
+    signal?.addEventListener('abort', abortFromCaller, { once: true })
+  }
+  const timer = globalThis.setTimeout(() => {
+    timedOut = true
+    controller.abort()
+  }, timeoutMs)
+  try {
+    return await operation(controller.signal)
+  } catch (error) {
+    if (timedOut) {
+      throw new Error(timeoutMessage, { cause: error })
+    }
+    throw error
+  } finally {
+    globalThis.clearTimeout(timer)
+    signal?.removeEventListener('abort', abortFromCaller)
+  }
 }
 
 async function requestDownload(path: string, options: RequestInit): Promise<DownloadFile> {
@@ -608,18 +641,23 @@ async function requestForm<T>(path: string, form: FormData): Promise<T> {
 }
 
 async function getAiProviderSnapshot(signal?: AbortSignal): Promise<AiProviderSnapshot> {
-  try {
-    return await request<AiProviderSnapshot>('/api/ai/provider-snapshot', { signal })
-  } catch (error) {
-    if (!(error instanceof ApiError) || error.status !== 404) {
-      throw error
+  return withRequestTimeout(async (requestSignal) => {
+    try {
+      return await request<AiProviderSnapshot>(
+        '/api/ai/provider-snapshot',
+        { signal: requestSignal },
+      )
+    } catch (error) {
+      if (!(error instanceof ApiError) || error.status !== 404) {
+        throw error
+      }
+      const [providers, options] = await Promise.all([
+        request<AiProviderStatus[]>('/api/ai/providers', { signal: requestSignal }),
+        request<AiProviderOptions[]>('/api/ai/provider-options', { signal: requestSignal }),
+      ])
+      return { providers, options }
     }
-    const [providers, options] = await Promise.all([
-      request<AiProviderStatus[]>('/api/ai/providers', { signal }),
-      request<AiProviderOptions[]>('/api/ai/provider-options', { signal }),
-    ])
-    return { providers, options }
-  }
+  }, signal, AI_PROVIDER_SNAPSHOT_TIMEOUT_MS, '读取模型连接状态超时，请重试')
 }
 
 export const api = {

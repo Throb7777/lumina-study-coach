@@ -21,6 +21,8 @@ from app.ai_preferences import (
     gemini_cli_model,
 )
 
+PROVIDER_PROBE_TIMEOUT_SECONDS = 10.0
+
 
 class AiProviderError(RuntimeError):
     pass
@@ -155,6 +157,16 @@ def friendly_codex_runtime_error(error: str) -> str:
     return error or "Codex 请求失败"
 
 
+def friendly_antigravity_error(error: str) -> str:
+    lowered = error.lower()
+    if (
+        "not logged into antigravity" in lowered
+        or "error getting token source" in lowered
+    ):
+        return "等待完成 Antigravity 登录"
+    return error or "Antigravity CLI 调用失败"
+
+
 def resolve_codex_executable() -> str | None:
     if os.name == "nt":
         npm_shim = shutil.which("codex.cmd")
@@ -242,18 +254,22 @@ class CodexAppServer:
                 ) from error
             self.reader_task = asyncio.create_task(self._read_stdout())
             self.stderr_task = asyncio.create_task(self._drain_stderr())
-            await self.request(
-                "initialize",
-                {
-                    "clientInfo": {
-                        "name": "learning_flow_coach",
-                        "title": "Learning Flow Coach",
-                        "version": "0.2.0",
+            try:
+                await self.request(
+                    "initialize",
+                    {
+                        "clientInfo": {
+                            "name": "learning_flow_coach",
+                            "title": "Learning Flow Coach",
+                            "version": "0.2.0",
+                        },
+                        "capabilities": {"experimentalApi": True},
                     },
-                    "capabilities": {"experimentalApi": True},
-                },
-            )
-            await self.notify("initialized", {})
+                )
+                await self.notify("initialized", {})
+            except BaseException:
+                await self.close()
+                raise
 
     async def close(self) -> None:
         process = self.process
@@ -301,8 +317,9 @@ class CodexAppServer:
         try:
             return await asyncio.wait_for(future, timeout=60)
         except TimeoutError as error:
-            self.pending.pop(request_id, None)
             raise AiProviderError(f"Codex 请求超时：{method}") from error
+        finally:
+            self.pending.pop(request_id, None)
 
     async def notify(self, method: str, params: dict[str, Any]) -> None:
         if not self.process or not self.process.stdin:
@@ -741,7 +758,11 @@ class AntigravityCli:
     async def model_options(self) -> list[AiModelOption]:
         code, stdout, stderr = await self._run_models()
         if code != 0:
-            raise AiProviderError(stderr or stdout or "无法读取 Antigravity 模型列表")
+            raise AiProviderError(
+                friendly_antigravity_error(
+                    stderr or stdout or "无法读取 Antigravity 模型列表"
+                )
+            )
         return self.parse_model_options(stdout)
 
     async def status(self, preferred_model: str | None = None) -> AiProviderStatus:
@@ -792,7 +813,11 @@ class AntigravityCli:
             detail = f"已连接 Antigravity，但当前模型 {selected_model} 不可用"
             state = "model_unavailable"
         else:
-            detail = models_stderr or "等待完成 Antigravity 登录"
+            detail = (
+                friendly_antigravity_error(models_stderr)
+                if models_stderr
+                else "等待完成 Antigravity 登录"
+            )
             state = "disconnected"
         return AiProviderStatus(
             "gemini",
@@ -958,6 +983,64 @@ class AiService:
     async def close(self) -> None:
         await asyncio.gather(self.codex.close(), self.gemini.close())
 
+    async def _codex_status(
+        self,
+        codex_model: str,
+        codex_reasoning_effort: str,
+    ) -> AiProviderStatus:
+        account = await self.codex.account()
+        version = await self.codex.cli_version()
+        if self.codex.authentication_invalid:
+            return AiProviderStatus(
+                "codex",
+                True,
+                False,
+                "Codex 登录已失效，请重新连接",
+                version=version,
+                state="disconnected",
+                preferred_model=display_model_name(codex_model),
+                reasoning_effort=codex_reasoning_effort,
+            )
+        if account is None:
+            return AiProviderStatus(
+                "codex",
+                True,
+                False,
+                "等待连接 Codex（使用 ChatGPT 账号授权）",
+                version=version,
+                state="disconnected",
+                preferred_model=display_model_name(codex_model),
+                reasoning_effort=codex_reasoning_effort,
+            )
+        try:
+            entries = await self.codex.model_entries()
+            model_available = codex_model in self.codex.model_names(entries)
+            detail = (
+                "已连接 Codex（ChatGPT 账号）"
+                if model_available
+                else "已连接 Codex，但当前模型 "
+                f"{display_model_name(codex_model)} 不可用"
+            )
+            state = "connected" if model_available else "model_unavailable"
+        except AiProviderError as error:
+            model_available = None
+            detail = f"已连接 Codex，但无法读取模型列表：{error}"
+            state = "error"
+        return AiProviderStatus(
+            provider="codex",
+            installed=True,
+            connected=True,
+            detail=detail,
+            account=account.get("email", ""),
+            plan=account.get("planType", ""),
+            version=version,
+            state=state,
+            preferred_model=display_model_name(codex_model),
+            model_available=model_available,
+            reasoning_effort=codex_reasoning_effort,
+            active_model=self.codex.active_model,
+        )
+
     async def statuses(
         self,
         *,
@@ -970,59 +1053,20 @@ class AiService:
         gemini_selected_model = gemini_cli_model(gemini_model, gemini_reasoning_effort)
         if self.codex.executable:
             try:
-                account = await self.codex.account()
-                version = await self.codex.cli_version()
-                if self.codex.authentication_invalid:
-                    codex_status = AiProviderStatus(
-                        "codex",
-                        True,
-                        False,
-                        "Codex 登录已失效，请重新连接",
-                        version=version,
-                        state="disconnected",
-                        preferred_model=display_model_name(codex_model),
-                        reasoning_effort=codex_reasoning_effort,
-                    )
-                elif account is None:
-                    codex_status = AiProviderStatus(
-                        "codex",
-                        True,
-                        False,
-                        "等待连接 Codex（使用 ChatGPT 账号授权）",
-                        version=version,
-                        state="disconnected",
-                        preferred_model=display_model_name(codex_model),
-                        reasoning_effort=codex_reasoning_effort,
-                    )
-                else:
-                    try:
-                        entries = await self.codex.model_entries()
-                        model_available = codex_model in self.codex.model_names(entries)
-                        detail = (
-                            "已连接 Codex（ChatGPT 账号）"
-                            if model_available
-                            else "已连接 Codex，但当前模型 "
-                            f"{display_model_name(codex_model)} 不可用"
-                        )
-                        state = "connected" if model_available else "model_unavailable"
-                    except AiProviderError as error:
-                        model_available = None
-                        detail = f"已连接 Codex，但无法读取模型列表：{error}"
-                        state = "error"
-                    codex_status = AiProviderStatus(
-                        provider="codex",
-                        installed=True,
-                        connected=True,
-                        detail=detail,
-                        account=account.get("email", ""),
-                        plan=account.get("planType", ""),
-                        version=version,
-                        state=state,
-                        preferred_model=display_model_name(codex_model),
-                        model_available=model_available,
-                        reasoning_effort=codex_reasoning_effort,
-                        active_model=self.codex.active_model,
-                    )
+                codex_status = await asyncio.wait_for(
+                    self._codex_status(codex_model, codex_reasoning_effort),
+                    timeout=PROVIDER_PROBE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                codex_status = AiProviderStatus(
+                    "codex",
+                    True,
+                    False,
+                    "Codex 连接状态读取超时，请重试",
+                    state="error",
+                    preferred_model=display_model_name(codex_model),
+                    reasoning_effort=codex_reasoning_effort,
+                )
             except AiProviderError as error:
                 detail = str(error)
                 codex_status = AiProviderStatus(
@@ -1044,10 +1088,23 @@ class AiService:
                 preferred_model=display_model_name(codex_model),
                 reasoning_effort=codex_reasoning_effort,
             )
-        gemini_status = (
-            await self.gemini.status(gemini_selected_model)
-            if gemini_enabled
-            else AiProviderStatus(
+        if gemini_enabled:
+            try:
+                gemini_status = await asyncio.wait_for(
+                    self.gemini.status(gemini_selected_model),
+                    timeout=PROVIDER_PROBE_TIMEOUT_SECONDS,
+                )
+            except TimeoutError:
+                gemini_status = AiProviderStatus(
+                    "gemini",
+                    bool(self.gemini.executable),
+                    False,
+                    "Antigravity 连接状态读取超时，请重试",
+                    state="error",
+                    preferred_model=gemini_selected_model,
+                )
+        else:
+            gemini_status = AiProviderStatus(
                 "gemini",
                 bool(self.gemini.executable),
                 False,
@@ -1055,7 +1112,6 @@ class AiService:
                 state="disconnected",
                 preferred_model=gemini_selected_model,
             )
-        )
         gemini_status.preferred_model = gemini_model
         gemini_status.reasoning_effort = gemini_reasoning_effort
         service_mode = (

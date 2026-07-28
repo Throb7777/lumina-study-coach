@@ -17,7 +17,7 @@
   <img alt="Windows 10 和 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b7894">
 </p>
 
-> **公开预览版：** Lumina v0.1.0 是首个 Windows 公开版本。
+> **公开预览版：** Lumina v0.1.1 是当前 Windows 公开版本。
 
 Lumina 把课程整理为章节、小节和连续的学习记录。每次学习围绕闭卷回顾、学习、
 主动重构、练习、批改纠错和下次问题展开；学完小节后，再把最终笔记保存为普通
@@ -30,7 +30,7 @@ Markdown 文件并交给 Obsidian 管理。
 ## 下载
 
 从 [GitHub Releases](https://github.com/Throb7777/lumina-study-coach/releases/latest)
-下载 `install_Lumina-0.1.0.exe`。安装包已经包含 Web 应用、本地服务和
+下载 `install_Lumina-0.1.1.exe`。安装包已经包含 Web 应用、本地服务和
 Python 运行时，普通使用不需要另外安装 Node.js 或 Python。
 
 当前预览版尚未进行代码签名，Windows SmartScreen 可能要求手动确认。
@@ -108,7 +108,7 @@ Windows 下安装 Inno Setup 6 后，运行 `build-installer.cmd` 可以生成�
 
 ## 当前边界
 
-Lumina v0.1.0 是本地单用户 Windows 应用。当前不提供云同步、多用户协作、
+Lumina v0.1.1 是本地单用户 Windows 应用。当前不提供云同步、多用户协作、
 移动端专项界面、ChatGPT/Gemini 网页自动控制或整个 Obsidian Vault 索引。
 外部 AI 功能也会受到 CLI 版本、账号权限和服务状态影响。
 
