@@ -30,7 +30,7 @@ def test_settings_note_read_write_and_external_conflict(client: TestClient, tmp_
     assert client.get("/api/settings").json() == {
         "obsidian_vault_path": "",
         "learner_profile": "",
-        "service_version": "0.1.1",
+        "service_version": "0.1.2",
         "desktop_launch": False,
         "semantic_search_enabled": False,
         "semantic_search_model_ready": False,

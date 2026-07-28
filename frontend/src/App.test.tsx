@@ -194,7 +194,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.1',
+          service_version: '0.1.2',
           desktop_launch: true,
         })
       }
@@ -209,7 +209,7 @@ describe('App', () => {
     renderApp(['/settings'])
 
     expect(await screen.findByText('Lumina 本地服务已连接')).toBeInTheDocument()
-    expect(screen.getByText('v0.1.1 · 本地数据服务运行正常')).toBeInTheDocument()
+    expect(screen.getByText('v0.1.2 · 本地数据服务运行正常')).toBeInTheDocument()
     expect(screen.getByText('Lumina')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '运行状态' })).not.toBeInTheDocument()
   })
@@ -220,7 +220,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.1',
+          service_version: '0.1.2',
           desktop_launch: false,
         })
       }
@@ -413,7 +413,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.1',
+          service_version: '0.1.2',
           desktop_launch: false,
         })
       }
@@ -1564,7 +1564,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.1',
+          service_version: '0.1.2',
           desktop_launch: true,
         })
       }

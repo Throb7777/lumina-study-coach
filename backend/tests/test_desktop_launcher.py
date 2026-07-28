@@ -12,7 +12,7 @@ def test_launcher_recognizes_only_the_study_web_health_payload() -> None:
         {
             "status": "ok",
             "service": "learning-flow-coach-api",
-            "version": "0.1.1",
+            "version": "0.1.2",
         }
     )
     assert not health_matches({"status": "ok", "service": "another-service"})

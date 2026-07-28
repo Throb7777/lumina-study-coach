@@ -2,6 +2,15 @@
 
 All notable public changes to Lumina are documented in this file.
 
+## [0.1.2] - 2026-07-28
+
+### Fixed
+
+- Prevent course header action labels from collapsing into vertical text at
+  intermediate viewport widths.
+- Prevent completed section rows and expanded study history from overflowing
+  the course page in standard and large font modes.
+
 ## [0.1.1] - 2026-07-28
 
 ### Fixed
@@ -38,5 +47,6 @@ All notable public changes to Lumina are documented in this file.
 - The application interface is currently Simplified Chinese.
 - The Windows installer is not code-signed yet.
 
+[0.1.2]: https://github.com/Throb7777/lumina-study-coach/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Throb7777/lumina-study-coach/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.0

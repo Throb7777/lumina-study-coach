@@ -17,7 +17,7 @@
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b7894">
 </p>
 
-> **Public preview:** Lumina v0.1.1 is the current public Windows release. The
+> **Public preview:** Lumina v0.1.2 is the current public Windows release. The
 > application interface is currently available in Simplified Chinese.
 
 Lumina turns a course into chapters, sections, and focused study records. Each
@@ -31,7 +31,7 @@ Markdown files that remain usable in Obsidian.
 
 ## Download
 
-Download `install_Lumina-0.1.1.exe` from the
+Download `install_Lumina-0.1.2.exe` from the
 [latest GitHub release](https://github.com/Throb7777/lumina-study-coach/releases/latest).
 The installer contains the web application, local service, and Python runtime.
 Node.js and Python are not required for normal use.
@@ -119,7 +119,7 @@ self-contained installer. Detailed instructions are in
 
 ## Project Status
 
-Lumina v0.1.1 is a local, single-user Windows application. It does not provide
+Lumina v0.1.2 is a local, single-user Windows application. It does not provide
 cloud sync, multi-user collaboration, mobile-specific UI, automatic web-chat
 control, or full-vault Obsidian indexing. External AI features remain subject
 to the installed CLIs, account permissions, and provider availability.
