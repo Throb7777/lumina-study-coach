@@ -78,7 +78,7 @@ def test_settings_note_read_write_and_external_conflict(client: TestClient, tmp_
     assert note_path.read_text(encoding="utf-8") == "# Web 中的旧版本"
 
 
-def test_note_path_rejects_unsafe_and_same_chapter_duplicates(
+def test_note_path_maps_unsafe_titles_and_same_chapter_duplicates(
     client: TestClient, tmp_path: Path
 ) -> None:
     vault = tmp_path / "vault"
@@ -87,8 +87,19 @@ def test_note_path_rejects_unsafe_and_same_chapter_duplicates(
 
     unsafe_section, _ = create_record(client, course_name="课程:非法")
     response = client.get(f"/api/sections/{unsafe_section['id']}/note")
-    assert response.status_code == 409
-    assert "Windows 文件名" in response.json()["detail"]
+    assert response.status_code == 200
+    unsafe_note = response.json()
+    assert unsafe_note["relative_path"].startswith("课程：非法--c")
+    assert ":" not in unsafe_note["relative_path"]
+    saved = client.put(
+        f"/api/sections/{unsafe_section['id']}/note",
+        json={"content": "# 可索引笔记", "expected_modified_at_ns": None},
+    )
+    assert saved.status_code == 200
+    assert (vault.joinpath(*unsafe_note["relative_path"].split("/"))).is_file()
+    note_index = client.get("/api/notes").json()
+    assert note_index["issues"] == []
+    assert any(item["section_id"] == unsafe_section["id"] for item in note_index["items"])
 
     course = client.post("/api/courses", json={"name": "线性代数"}).json()
     first_chapter = client.post(
@@ -97,10 +108,110 @@ def test_note_path_rejects_unsafe_and_same_chapter_duplicates(
     first = client.post(
         f"/api/chapters/{first_chapter['id']}/sections", json={"title": "向量"}
     ).json()
-    client.post(f"/api/chapters/{first_chapter['id']}/sections", json={"title": "向量"})
-    response = client.get(f"/api/sections/{first['id']}/note")
-    assert response.status_code == 409
-    assert "同一章节存在同名小节" in response.json()["detail"]
+    second = client.post(
+        f"/api/chapters/{first_chapter['id']}/sections", json={"title": "向量"}
+    ).json()
+    first_note = client.get(f"/api/sections/{first['id']}/note")
+    second_note = client.get(f"/api/sections/{second['id']}/note")
+    assert first_note.status_code == 200
+    assert second_note.status_code == 200
+    assert first_note.json()["relative_path"] != second_note.json()["relative_path"]
+    assert second_note.json()["file_name"].endswith(f"--s{second['id']}.md")
+
+
+def test_note_path_handles_reserved_and_long_titles(
+    client: TestClient, tmp_path: Path
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    configure_vault(client, vault)
+    course = client.post("/api/courses", json={"name": "CON"}).json()
+    chapter = client.post(
+        f"/api/courses/{course['id']}/chapters",
+        json={"title": "NUL"},
+    ).json()
+    long_title = "Class: " + ("Very long topic " * 20)
+    section = client.post(
+        f"/api/chapters/{chapter['id']}/sections",
+        json={"title": long_title[:200]},
+    ).json()
+
+    response = client.get(f"/api/sections/{section['id']}/note")
+
+    assert response.status_code == 200
+    note = response.json()
+    parts = note["relative_path"].split("/")
+    assert len(parts) == 3
+    assert all(len(part.removesuffix(".md")) <= 200 for part in parts)
+    assert parts[0].startswith("＿CON")
+    assert parts[1].startswith("＿NUL")
+    assert ":" not in note["relative_path"]
+    assert "Very long topic" in note["file_name"]
+    assert note["file_name"] == parts[-1]
+
+
+def test_note_path_remains_reachable_after_titles_are_renamed(
+    client: TestClient, tmp_path: Path
+) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    section, _ = create_record(client)
+    configure_vault(client, vault)
+    note_url = f"/api/sections/{section['id']}/note"
+    opened = client.get(note_url).json()
+    saved = client.put(
+        note_url,
+        json={
+            "content": "# 已保存笔记",
+            "expected_modified_at_ns": opened["modified_at_ns"],
+        },
+    ).json()
+    course_id = client.get("/api/courses").json()[0]["id"]
+    chapter_id = section["chapter_id"]
+
+    assert client.patch(f"/api/courses/{course_id}", json={"name": "新课程名"}).status_code == 200
+    assert (
+        client.patch(f"/api/chapters/{chapter_id}", json={"title": "新章节名"}).status_code
+        == 200
+    )
+    assert client.patch(
+        f"/api/sections/{section['id']}",
+        json={"title": "新小节名"},
+    ).status_code == 200
+
+    reopened = client.get(note_url)
+    assert reopened.status_code == 200
+    assert reopened.json()["content"] == "# 已保存笔记"
+    assert reopened.json()["relative_path"] == saved["relative_path"]
+
+
+def test_note_write_supports_a_deep_windows_vault(
+    client: TestClient, tmp_path: Path
+) -> None:
+    vault = tmp_path
+    for index in range(2):
+        vault /= f"deep-vault-segment-{index}-with-a-readable-name"
+    vault.mkdir(parents=True)
+    section, _ = create_record(
+        client,
+        course_name="A long course title: " + ("probability " * 10),
+    )
+    configure_vault(client, vault)
+    note_url = f"/api/sections/{section['id']}/note"
+    opened = client.get(note_url).json()
+
+    response = client.put(
+        note_url,
+        json={
+            "content": "# 深层 Vault 笔记",
+            "expected_modified_at_ns": opened["modified_at_ns"],
+        },
+    )
+
+    assert response.status_code == 200
+    saved = response.json()
+    assert saved["content"] == "# 深层 Vault 笔记"
+    assert client.get(note_url).json()["content"] == "# 深层 Vault 笔记"
 
 
 def test_note_path_allows_same_title_in_different_chapters(

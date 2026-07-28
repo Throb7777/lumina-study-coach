@@ -2,7 +2,7 @@ import asyncio
 import json
 from contextlib import suppress
 from datetime import date, datetime
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Annotated
 
 from fastapi import (
@@ -128,6 +128,7 @@ from app.models import (
 from app.notes import (
     NoteConflictError,
     NotePathError,
+    assign_note_relative_path,
     get_vault_path,
     read_section_note,
     save_vault_path,
@@ -1661,6 +1662,8 @@ def create_section(chapter_id: int, payload: SectionCreate, session: SessionDepe
         position = 0 if current_max is None else current_max + 1
     section = Section(chapter_id=chapter_id, title=payload.title, position=position)
     session.add(section)
+    session.flush()
+    assign_note_relative_path(session, section)
     session.commit()
     return section
 
@@ -2737,6 +2740,10 @@ def list_notes(session: SessionDependency) -> NoteIndexRead:
             issues.append(
                 NoteIndexIssue(
                     section_id=section.id,
+                    course_id=section.chapter.course_id,
+                    course_name=section.chapter.course.name,
+                    chapter_id=section.chapter_id,
+                    chapter_title=section.chapter.title,
                     section_title=section.title,
                     detail=str(error),
                 )
@@ -2790,7 +2797,7 @@ def get_section_note(section_id: int, session: SessionDependency) -> SectionNote
         raise HTTPException(status_code=409, detail=str(error)) from error
     return SectionNoteRead(
         section_id=section.id,
-        file_name=f"{section.title}.md",
+        file_name=PurePosixPath(relative_path).name,
         relative_path=relative_path,
         content=content,
         modified_at_ns=modified_at_ns,
@@ -2827,7 +2834,7 @@ def save_section_note(
         raise HTTPException(status_code=422, detail=str(error)) from error
     return SectionNoteRead(
         section_id=section.id,
-        file_name=f"{section.title}.md",
+        file_name=PurePosixPath(relative_path).name,
         relative_path=relative_path,
         content=content,
         modified_at_ns=modified_at_ns,

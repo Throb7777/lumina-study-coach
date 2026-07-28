@@ -1,22 +1,16 @@
 import os
 import tempfile
 from functools import lru_cache
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.models import AppSetting, Chapter, Section
+from app.file_names import safe_path_segment
+from app.models import AppSetting, Chapter, Course, Section
 
 OBSIDIAN_VAULT_KEY = "obsidian_vault_path"
-WINDOWS_RESERVED_NAMES = {
-    "CON",
-    "PRN",
-    "AUX",
-    "NUL",
-    *(f"COM{number}" for number in range(1, 10)),
-    *(f"LPT{number}" for number in range(1, 10)),
-}
+NOTE_SEGMENT_MAX_LENGTH = 200
 
 
 class NotePathError(ValueError):
@@ -25,6 +19,17 @@ class NotePathError(ValueError):
 
 class NoteConflictError(RuntimeError):
     pass
+
+
+def _filesystem_path(path: Path) -> Path:
+    if os.name != "nt":
+        return path
+    raw_path = str(path)
+    if raw_path.startswith("\\\\?\\"):
+        return path
+    if raw_path.startswith("\\\\"):
+        return Path(f"\\\\?\\UNC\\{raw_path[2:]}")
+    return Path(f"\\\\?\\{raw_path}")
 
 
 @lru_cache(maxsize=256)
@@ -60,15 +65,113 @@ def save_vault_path(session: Session, raw_path: str) -> Path:
     return vault
 
 
-def validate_path_segment(value: str, label: str) -> None:
-    if value in {"", ".", ".."}:
-        raise NotePathError(f"{label}不能作为 Markdown 文件名")
-    if value.endswith((" ", ".")):
-        raise NotePathError(f"{label}不能以空格或句点结尾")
-    if any(character in '<>:"/\\|?*' or ord(character) < 32 for character in value):
-        raise NotePathError(f"{label}包含 Windows 文件名不支持的字符")
-    if value.split(".", 1)[0].upper() in WINDOWS_RESERVED_NAMES:
-        raise NotePathError(f"{label}是 Windows 保留文件名")
+def _segment_collision(
+    session: Session,
+    model: type[Course] | type[Chapter] | type[Section],
+    value: str,
+    entity_id: int,
+    parent_field: object | None = None,
+    parent_id: int | None = None,
+) -> bool:
+    statement = select(model)
+    if parent_field is not None:
+        statement = statement.where(parent_field == parent_id)
+    peers = session.scalars(statement)
+    expected = safe_path_segment(value, "_", max_length=NOTE_SEGMENT_MAX_LENGTH).casefold()
+    return any(
+        item.id != entity_id
+        and safe_path_segment(
+            item.name if isinstance(item, Course) else item.title,
+            "_",
+            max_length=NOTE_SEGMENT_MAX_LENGTH,
+        ).casefold()
+        == expected
+        for item in peers
+    )
+
+
+def assign_note_relative_path(session: Session, section: Section) -> str:
+    course = section.chapter.course
+    chapter = section.chapter
+    course_segment = safe_path_segment(
+        course.name,
+        f"课程-{course.id}",
+        max_length=NOTE_SEGMENT_MAX_LENGTH,
+        suffix=f"--c{course.id}",
+        force_suffix=_segment_collision(session, Course, course.name, course.id),
+    )
+    chapter_segment = safe_path_segment(
+        chapter.title,
+        f"章节-{chapter.id}",
+        max_length=NOTE_SEGMENT_MAX_LENGTH,
+        suffix=f"--h{chapter.id}",
+        force_suffix=_segment_collision(
+            session,
+            Chapter,
+            chapter.title,
+            chapter.id,
+            Chapter.course_id,
+            chapter.course_id,
+        ),
+    )
+    section_segment = safe_path_segment(
+        section.title,
+        f"小节-{section.id}",
+        max_length=NOTE_SEGMENT_MAX_LENGTH,
+        suffix=f"--s{section.id}",
+        force_suffix=_segment_collision(
+            session,
+            Section,
+            section.title,
+            section.id,
+            Section.chapter_id,
+            section.chapter_id,
+        ),
+    )
+    relative_path = f"{course_segment}/{chapter_segment}/{section_segment}.md"
+
+    existing_paths = {
+        path.casefold()
+        for path in session.scalars(
+            select(Section.note_relative_path).where(
+                Section.id != section.id,
+                Section.note_relative_path.is_not(None),
+            )
+        )
+        if path
+    }
+    if relative_path.casefold() in existing_paths:
+        section_segment = safe_path_segment(
+            section.title,
+            f"小节-{section.id}",
+            max_length=NOTE_SEGMENT_MAX_LENGTH,
+            suffix=f"--s{section.id}",
+            force_suffix=True,
+        )
+        relative_path = f"{course_segment}/{chapter_segment}/{section_segment}.md"
+    if relative_path.casefold() in existing_paths:
+        raise NotePathError("无法为小节分配唯一的 Markdown 文件路径")
+
+    section.note_relative_path = relative_path
+    return relative_path
+
+
+def _stored_note_path(section: Section) -> PurePosixPath:
+    if not section.note_relative_path:
+        raise NotePathError("小节笔记路径尚未初始化")
+    relative_path = PurePosixPath(section.note_relative_path)
+    if (
+        relative_path.is_absolute()
+        or len(relative_path.parts) != 3
+        or relative_path.suffix.casefold() != ".md"
+        or any(
+            part in {"", ".", ".."}
+            or safe_path_segment(part, "_", max_length=1000) != part
+            for part in relative_path.parts
+        )
+    ):
+        raise NotePathError("小节笔记路径配置无效")
+    return relative_path
 
 
 def section_note_paths(session: Session, section: Section) -> tuple[Path, Path, str]:
@@ -80,21 +183,14 @@ def section_note_paths(session: Session, section: Section) -> tuple[Path, Path, 
     except OSError as error:
         raise NotePathError("已配置的 Obsidian vault 路径不存在或无法访问") from error
 
-    course = section.chapter.course
-    validate_path_segment(course.name, "课程名称")
-    validate_path_segment(section.chapter.title, "章节标题")
-    validate_path_segment(section.title, "小节标题")
-
-    sibling_sections = session.scalars(
-        select(Section).where(Section.chapter_id == section.chapter_id, Section.id != section.id)
-    )
-    if any(item.title.casefold() == section.title.casefold() for item in sibling_sections):
-        raise NotePathError("同一章节存在同名小节，无法确定唯一 Markdown 文件")
-
-    course_directory = (vault / course.name).resolve(strict=False)
-    chapter_directory = (course_directory / section.chapter.title).resolve(strict=False)
-    target = (chapter_directory / f"{section.title}.md").resolve(strict=False)
-    legacy_target = (course_directory / f"{section.title}.md").resolve(strict=False)
+    if not section.note_relative_path:
+        assign_note_relative_path(session, section)
+        session.commit()
+    relative_path = _stored_note_path(section)
+    course_directory = (vault / relative_path.parts[0]).resolve(strict=False)
+    chapter_directory = (course_directory / relative_path.parts[1]).resolve(strict=False)
+    target = (chapter_directory / relative_path.parts[2]).resolve(strict=False)
+    legacy_target = (course_directory / relative_path.parts[2]).resolve(strict=False)
     if (
         not course_directory.is_relative_to(vault)
         or not chapter_directory.is_relative_to(course_directory)
@@ -102,18 +198,22 @@ def section_note_paths(session: Session, section: Section) -> tuple[Path, Path, 
         or not legacy_target.is_relative_to(course_directory)
     ):
         raise NotePathError("笔记路径超出已配置的 Obsidian vault")
-    return target, legacy_target, f"{course.name}/{section.chapter.title}/{section.title}.md"
+    return _filesystem_path(target), _filesystem_path(legacy_target), relative_path.as_posix()
 
 
 def legacy_note_is_unambiguous(session: Session, section: Section) -> bool:
     course_id = section.chapter.course_id
+    current_path = _stored_note_path(section)
     same_named_sections = session.scalars(
         select(Section)
         .join(Chapter)
         .where(Chapter.course_id == course_id, Section.id != section.id)
     )
     return not any(
-        item.title.casefold() == section.title.casefold() for item in same_named_sections
+        item.note_relative_path
+        and PurePosixPath(item.note_relative_path).name.casefold()
+        == current_path.name.casefold()
+        for item in same_named_sections
     )
 
 
@@ -166,7 +266,9 @@ def write_section_note(
         target.parent.mkdir(parents=True, exist_ok=True)
         resolved_parent = target.parent.resolve(strict=True)
         vault = get_vault_path(session)
-        if vault is None or not resolved_parent.is_relative_to(vault.resolve(strict=True)):
+        if vault is None or not resolved_parent.is_relative_to(
+            _filesystem_path(vault.resolve(strict=True))
+        ):
             raise NotePathError("笔记目录超出已配置的 Obsidian vault")
         with tempfile.NamedTemporaryFile(
             mode="w",

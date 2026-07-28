@@ -1,6 +1,7 @@
 import { Navigate, createBrowserRouter } from 'react-router-dom'
 import type { RouteObject } from 'react-router-dom'
 import App from './App'
+import { RouteErrorBoundary } from './components/RouteErrorBoundary'
 import {
   courseLoader,
   courseMemoryLoader,
@@ -17,6 +18,7 @@ export const appRoutes: RouteObject[] = [
   {
     path: '/',
     element: <App />,
+    errorElement: <RouteErrorBoundary />,
     hydrateFallbackElement: (
       <span className="route-progress route-progress--initial route-progress--visible" aria-hidden="true" />
     ),

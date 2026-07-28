@@ -57,10 +57,31 @@ def health_matches(payload: object) -> bool:
     )
 
 
-def service_is_ready(timeout: float = 0.8) -> bool:
+def frontend_build_id(index_file: Path) -> str | None:
+    try:
+        return hashlib.sha256(index_file.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return None
+
+
+def health_matches_frontend(payload: object, expected_build_id: str) -> bool:
+    return (
+        health_matches(payload)
+        and payload.get("frontend_ready") is True
+        and payload.get("frontend_build_id") == expected_build_id
+    )
+
+
+def service_is_ready(
+    timeout: float = 0.8,
+    expected_frontend_build_id: str | None = None,
+) -> bool:
     try:
         with urllib.request.urlopen(HEALTH_URL, timeout=timeout) as response:
-            return health_matches(json.loads(response.read().decode("utf-8")))
+            payload = json.loads(response.read().decode("utf-8"))
+            if expected_frontend_build_id is not None:
+                return health_matches_frontend(payload, expected_frontend_build_id)
+            return health_matches(payload)
     except (OSError, ValueError, urllib.error.URLError):
         return False
 
@@ -111,13 +132,19 @@ class SingleInstanceMutex:
 
 
 def open_application(paths: RuntimePaths) -> None:
-    os.startfile(f"{BASE_URL}/courses")
+    build_id = frontend_build_id(paths.frontend_index)
+    launch_query = f"?launch={build_id}" if build_id else ""
+    os.startfile(f"{BASE_URL}/courses{launch_query}")
 
 
-def wait_until_ready(process: subprocess.Popen[bytes] | None, timeout: float = 30) -> bool:
+def wait_until_ready(
+    process: subprocess.Popen[bytes] | None,
+    expected_frontend_build_id: str,
+    timeout: float = 30,
+) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if service_is_ready():
+        if service_is_ready(expected_frontend_build_id=expected_frontend_build_id):
             return True
         if process is not None and process.poll() is not None:
             return False
@@ -158,13 +185,17 @@ def launch() -> int:
             0x10,
         )
         return 1
+    expected_frontend_build_id = frontend_build_id(paths.frontend_index)
+    if expected_frontend_build_id is None:
+        show_message(APPLICATION_NAME, "无法读取前端构建文件，请重新安装 Lumina。", 0x10)
+        return 1
 
     with SingleInstanceMutex(paths.project_root) as mutex:
-        if service_is_ready():
+        if service_is_ready(expected_frontend_build_id=expected_frontend_build_id):
             open_application(paths)
             return 0
         if mutex.already_exists:
-            if wait_until_ready(None):
+            if wait_until_ready(None, expected_frontend_build_id):
                 open_application(paths)
                 return 0
             show_message(APPLICATION_NAME, "本地服务仍在启动，请稍后再次打开。", 0x30)
@@ -182,7 +213,7 @@ def launch() -> int:
         except OSError as error:
             show_message(APPLICATION_NAME, f"无法启动本地服务：{error}", 0x10)
             return 1
-        if wait_until_ready(process):
+        if wait_until_ready(process, expected_frontend_build_id):
             open_application(paths)
             return 0
 

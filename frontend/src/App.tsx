@@ -1,4 +1,11 @@
-import { useEffect, useState } from 'react'
+import {
+  useEffect,
+  useRef,
+  useState,
+  type CSSProperties,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react'
 import { BookX, Library, NotebookPen, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
 import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router-dom'
 import './App.css'
@@ -10,8 +17,23 @@ import {
 import { UnsavedChangesProvider } from './components/UnsavedChangesGuard'
 
 const sidebarPreferenceKey = 'learning-flow-coach.sidebar-collapsed'
+const sidebarWidthPreferenceKey = 'learning-flow-coach.sidebar-width'
 const courseRoutePreferenceKey = 'learning-flow-coach.last-course-route'
 const routeProgressDelayMs = 150
+const sidebarMinWidth = 144
+const sidebarCompactThreshold = 168
+const sidebarMaxWidth = 236
+
+function clampSidebarWidth(value: number) {
+  return Math.min(sidebarMaxWidth, Math.max(sidebarMinWidth, Math.round(value)))
+}
+
+function readSidebarWidth() {
+  const savedWidth = Number(localStorage.getItem(sidebarWidthPreferenceKey))
+  return Number.isFinite(savedWidth) && savedWidth > 0
+    ? clampSidebarWidth(savedWidth)
+    : sidebarMaxWidth
+}
 
 function isCourseDataPath(pathname: string) {
   return pathname === '/courses'
@@ -57,6 +79,11 @@ function App() {
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(sidebarPreferenceKey) === 'true',
   )
+  const [sidebarWidth, setSidebarWidth] = useState(readSidebarWidth)
+  const [sidebarResizing, setSidebarResizing] = useState(false)
+  const sidebarWidthRef = useRef(sidebarWidth)
+  const sidebarResizingRef = useRef(false)
+  const appShellRef = useRef<HTMLDivElement>(null)
   const [appearance, setAppearance] = useState(readAppearancePreferences)
   const inCourseWorkspace = isCourseWorkspacePath(location.pathname)
   const savedCourseRoute = readLastCourseRoute()
@@ -71,6 +98,65 @@ function App() {
     localStorage.setItem(sidebarPreferenceKey, String(sidebarCollapsed))
   }, [sidebarCollapsed])
 
+  function updateSidebarWidth(value: number) {
+    const nextWidth = clampSidebarWidth(value)
+    sidebarWidthRef.current = nextWidth
+    setSidebarWidth(nextWidth)
+  }
+
+  function persistSidebarWidth() {
+    localStorage.setItem(sidebarWidthPreferenceKey, String(sidebarWidthRef.current))
+  }
+
+  function handleSidebarResizeStart(event: ReactPointerEvent<HTMLDivElement>) {
+    if (sidebarCollapsed || event.button !== 0) return
+    sidebarResizingRef.current = true
+    setSidebarResizing(true)
+  }
+
+  useEffect(() => {
+    if (!sidebarResizing) return
+
+    function handleSidebarResize(event: globalThis.PointerEvent) {
+      if (!sidebarResizingRef.current) return
+      const shellLeft = appShellRef.current?.getBoundingClientRect().left ?? 0
+      const nextWidth = clampSidebarWidth(event.clientX - shellLeft)
+      sidebarWidthRef.current = nextWidth
+      setSidebarWidth(nextWidth)
+    }
+
+    function handleSidebarResizeEnd() {
+      if (!sidebarResizingRef.current) return
+      sidebarResizingRef.current = false
+      setSidebarResizing(false)
+      localStorage.setItem(sidebarWidthPreferenceKey, String(sidebarWidthRef.current))
+    }
+
+    window.addEventListener('pointermove', handleSidebarResize)
+    window.addEventListener('pointerup', handleSidebarResizeEnd)
+    window.addEventListener('pointercancel', handleSidebarResizeEnd)
+
+    return () => {
+      window.removeEventListener('pointermove', handleSidebarResize)
+      window.removeEventListener('pointerup', handleSidebarResizeEnd)
+      window.removeEventListener('pointercancel', handleSidebarResizeEnd)
+    }
+  }, [sidebarResizing])
+
+  function handleSidebarResizeKeyDown(event: KeyboardEvent<HTMLDivElement>) {
+    const keyWidths: Partial<Record<string, number>> = {
+      ArrowLeft: sidebarWidth - 8,
+      ArrowRight: sidebarWidth + 8,
+      Home: sidebarMinWidth,
+      End: sidebarMaxWidth,
+    }
+    const nextWidth = keyWidths[event.key]
+    if (nextWidth === undefined) return
+    event.preventDefault()
+    updateSidebarWidth(nextWidth)
+    window.setTimeout(persistSidebarWidth, 0)
+  }
+
   useEffect(() => {
     applyAppearancePreferences(appearance)
     saveAppearancePreferences(appearance)
@@ -83,7 +169,11 @@ function App() {
 
   return (
     <UnsavedChangesProvider>
-    <div className={`app-shell${sidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}`}>
+    <div
+      ref={appShellRef}
+      className={`app-shell${sidebarCollapsed ? ' app-shell--sidebar-collapsed' : ''}${!sidebarCollapsed && sidebarWidth <= sidebarCompactThreshold ? ' app-shell--sidebar-compact' : ''}${sidebarResizing ? ' app-shell--sidebar-resizing' : ''}`}
+      style={{ '--sidebar-expanded-width': `${sidebarWidth}px` } as CSSProperties}
+    >
       <RouteProgress />
       <aside className="sidebar" aria-label="Lumina 应用侧栏">
         <div className="sidebar-header">
@@ -128,6 +218,19 @@ function App() {
           </NavLink>
         </nav>
         <p className="sidebar-footnote">本地学习工作台</p>
+        <div
+          className="sidebar-resizer"
+          role="separator"
+          aria-label="调整侧栏宽度"
+          aria-orientation="vertical"
+          aria-valuemin={sidebarMinWidth}
+          aria-valuemax={sidebarMaxWidth}
+          aria-valuenow={sidebarWidth}
+          aria-valuetext={`${sidebarWidth} 像素`}
+          tabIndex={sidebarCollapsed ? -1 : 0}
+          onPointerDown={handleSidebarResizeStart}
+          onKeyDown={handleSidebarResizeKeyDown}
+        />
       </aside>
 
       <Outlet context={{ appearance, onAppearanceChange: setAppearance } satisfies AppOutletContext} />

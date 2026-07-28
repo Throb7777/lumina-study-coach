@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import argparse
 import ctypes
+import hashlib
 import json
 import os
 import socket
@@ -146,11 +147,33 @@ def health_matches(payload: object) -> bool:
     )
 
 
-def service_is_ready(environment: dict[str, str] | None = None, timeout: float = 0.8) -> bool:
+def frontend_build_id(index_file: Path) -> str | None:
+    try:
+        return hashlib.sha256(index_file.read_bytes()).hexdigest()[:16]
+    except OSError:
+        return None
+
+
+def health_matches_frontend(payload: object, expected_build_id: str) -> bool:
+    return (
+        health_matches(payload)
+        and payload.get("frontend_ready") is True
+        and payload.get("frontend_build_id") == expected_build_id
+    )
+
+
+def service_is_ready(
+    environment: dict[str, str] | None = None,
+    timeout: float = 0.8,
+    expected_frontend_build_id: str | None = None,
+) -> bool:
     _, health_url, _ = service_urls(environment)
     try:
         with urllib.request.urlopen(health_url, timeout=timeout) as response:
-            return health_matches(json.loads(response.read().decode("utf-8")))
+            payload = json.loads(response.read().decode("utf-8"))
+            if expected_frontend_build_id is not None:
+                return health_matches_frontend(payload, expected_frontend_build_id)
+            return health_matches(payload)
     except (OSError, ValueError, urllib.error.URLError):
         return False
 
@@ -241,11 +264,15 @@ class ReleaseMutex:
 def wait_until_ready(
     process: subprocess.Popen[bytes] | None,
     environment: dict[str, str] | None = None,
+    expected_frontend_build_id: str | None = None,
     timeout: float = 30,
 ) -> bool:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if service_is_ready(environment):
+        if service_is_ready(
+            environment,
+            expected_frontend_build_id=expected_frontend_build_id,
+        ):
             return True
         if process is not None and process.poll() is not None:
             return False
@@ -308,23 +335,40 @@ def request_shutdown(environment: dict[str, str] | None = None) -> bool:
         return False
 
 
-def open_application(environment: dict[str, str] | None = None) -> None:
+def open_application(
+    paths: ReleasePaths,
+    environment: dict[str, str] | None = None,
+) -> None:
     base_url, _, _ = service_urls(environment)
-    os.startfile(f"{base_url}/courses")
+    build_id = frontend_build_id(paths.static_dir / "index.html")
+    launch_query = f"?launch={build_id}" if build_id else ""
+    os.startfile(f"{base_url}/courses{launch_query}")
 
 
 def launch(paths: ReleasePaths, environment: dict[str, str]) -> int:
-    if not paths.static_dir.joinpath("index.html").is_file():
+    frontend_index = paths.static_dir / "index.html"
+    if not frontend_index.is_file():
         show_message(APPLICATION_NAME, "安装文件不完整，请重新安装 Lumina。", 0x10)
+        return 1
+    expected_frontend_build_id = frontend_build_id(frontend_index)
+    if expected_frontend_build_id is None:
+        show_message(APPLICATION_NAME, "无法读取前端构建文件，请重新安装 Lumina。", 0x10)
         return 1
     initialize_data_root(paths)
     with ReleaseMutex() as mutex:
-        if service_is_ready(environment):
-            open_application(environment)
+        if service_is_ready(
+            environment,
+            expected_frontend_build_id=expected_frontend_build_id,
+        ):
+            open_application(paths, environment)
             return 0
         if mutex.already_exists:
-            if wait_until_ready(None, environment):
-                open_application(environment)
+            if wait_until_ready(
+                None,
+                environment,
+                expected_frontend_build_id,
+            ):
+                open_application(paths, environment)
                 return 0
             show_message(APPLICATION_NAME, "本地服务仍在启动，请稍后再次打开。", 0x30)
             return 1
@@ -340,8 +384,12 @@ def launch(paths: ReleasePaths, environment: dict[str, str]) -> int:
         except OSError as error:
             show_message(APPLICATION_NAME, f"无法启动本地服务：{error}", 0x10)
             return 1
-        if wait_until_ready(process, environment):
-            open_application(environment)
+        if wait_until_ready(
+            process,
+            environment,
+            expected_frontend_build_id,
+        ):
+            open_application(paths, environment)
             return 0
     show_message(
         APPLICATION_NAME,

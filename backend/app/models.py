@@ -214,6 +214,9 @@ class Section(TimestampMixin, Base):
         ForeignKey("chapters.id", ondelete="CASCADE"), index=True, nullable=False
     )
     title: Mapped[str] = mapped_column(String(200), nullable=False)
+    note_relative_path: Mapped[str | None] = mapped_column(
+        String(1000), unique=True, nullable=True
+    )
     position: Mapped[int] = mapped_column(Integer(), default=0, nullable=False)
     status: Mapped[SectionStatus] = mapped_column(
         Enum(

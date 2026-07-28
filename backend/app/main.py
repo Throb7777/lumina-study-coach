@@ -16,12 +16,16 @@ from app.database import create_database_engine, create_session_factory
 from app.migrations import upgrade_database
 from app.models import AiRun, AiRunStatus
 from app.request_security import local_write_rejection
+from app.static_assets import inspect_frontend_build
 
 
 class HealthResponse(BaseModel):
     status: str
     service: str
     version: str
+    frontend_build_id: str | None
+    frontend_entry: str | None
+    frontend_ready: bool
 
 
 class ShutdownRequest(BaseModel):
@@ -90,6 +94,8 @@ def create_app(
     application.state.today_provider = today_provider or date.today
     application.state.shutdown_callback = shutdown_callback
     application.state.first_run_marker = (first_run_marker or settings.first_run_marker).resolve()
+    resolved_static_dir = (static_dir or settings.static_dir).resolve()
+    frontend_build = inspect_frontend_build(resolved_static_dir)
 
     @application.middleware("http")
     async def protect_local_writes(request: Request, call_next):
@@ -104,6 +110,9 @@ def create_app(
             status="ok",
             service=settings.app_name,
             version=settings.app_version,
+            frontend_build_id=frontend_build.build_id if frontend_build else None,
+            frontend_entry=frontend_build.entry if frontend_build else None,
+            frontend_ready=frontend_build.ready if frontend_build else False,
         )
 
     @application.post("/api/system/shutdown", response_model=ShutdownResponse)
@@ -125,7 +134,6 @@ def create_app(
 
     application.include_router(api_router)
 
-    resolved_static_dir = (static_dir or settings.static_dir).resolve()
     index_file = resolved_static_dir / "index.html"
 
     if index_file.is_file():
@@ -137,9 +145,21 @@ def create_app(
 
             requested_file = (resolved_static_dir / full_path).resolve()
             if requested_file.is_relative_to(resolved_static_dir) and requested_file.is_file():
-                return FileResponse(requested_file)
+                headers = (
+                    {"Cache-Control": "no-store"}
+                    if requested_file == index_file
+                    else (
+                        {"Cache-Control": "public, max-age=31536000, immutable"}
+                        if full_path.startswith("assets/")
+                        else {"Cache-Control": "no-cache"}
+                    )
+                )
+                return FileResponse(requested_file, headers=headers)
 
-            return FileResponse(index_file)
+            if full_path == "assets" or full_path.startswith("assets/") or Path(full_path).suffix:
+                raise HTTPException(status_code=404, detail="Not Found")
+
+            return FileResponse(index_file, headers={"Cache-Control": "no-store"})
     else:
 
         @application.get("/", include_in_schema=False)

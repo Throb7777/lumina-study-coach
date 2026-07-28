@@ -72,7 +72,12 @@ export function NotesPage() {
           {notes.issues.length > 0 && (
             <details className="index-warning">
               <summary>{notes.issues.length} 个小节笔记暂时无法索引</summary>
-              <ul>{notes.issues.map((issue) => <li key={issue.section_id}><strong>{issue.section_title}</strong>：{issue.detail}</li>)}</ul>
+              <ul>{notes.issues.map((issue) => (
+                <li key={issue.section_id}>
+                  <strong>{issue.course_name} / {issue.chapter_title} / {issue.section_title}</strong>
+                  ：{issue.detail}
+                </li>
+              ))}</ul>
             </details>
           )}
 

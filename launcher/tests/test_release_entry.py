@@ -6,7 +6,10 @@ from pathlib import Path
 from launcher.release_entry import (
     apply_install_config,
     configure_release_environment,
+    frontend_build_id,
+    health_matches_frontend,
     initialize_data_root,
+    open_application,
     release_data_root,
     release_paths,
     release_port,
@@ -117,6 +120,40 @@ def test_first_run_marker_is_created_only_without_a_database() -> None:
         paths.database.touch()
         initialize_data_root(paths)
         assert not paths.first_run_marker.exists()
+
+
+def test_release_launcher_requires_the_expected_ready_frontend_build() -> None:
+    payload = {
+        "status": "ok",
+        "service": "learning-flow-coach-api",
+        "frontend_build_id": "current-build",
+        "frontend_ready": True,
+    }
+
+    assert health_matches_frontend(payload, "current-build")
+    assert not health_matches_frontend(payload, "old-build")
+    assert not health_matches_frontend({**payload, "frontend_ready": False}, "current-build")
+
+
+def test_release_launcher_opens_courses_with_build_identity(
+    tmp_path: Path, monkeypatch
+) -> None:
+    paths = release_paths(
+        {"LUMINA_DATA_DIR": str(tmp_path / "data")},
+        executable=tmp_path / "Lumina.exe",
+        bundled=tmp_path / "bundle",
+    )
+    index_file = paths.static_dir / "index.html"
+    index_file.parent.mkdir(parents=True)
+    index_file.write_text("<html>release build</html>", encoding="utf-8")
+    opened: list[str] = []
+    monkeypatch.setattr("launcher.release_entry.os.startfile", opened.append)
+
+    open_application(paths, {"LEARNING_COACH_PORT": "8123"})
+
+    assert opened == [
+        f"http://127.0.0.1:8123/courses?launch={frontend_build_id(index_file)}"
+    ]
 
 
 def test_wait_until_stopped_waits_for_health_and_port_release(monkeypatch) -> None:

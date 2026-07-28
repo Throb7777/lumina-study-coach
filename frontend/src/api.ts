@@ -502,6 +502,10 @@ export interface NoteIndexItem {
 
 export interface NoteIndexIssue {
   section_id: number
+  course_id: number
+  course_name: string
+  chapter_id: number
+  chapter_title: string
   section_title: string
   detail: string
 }

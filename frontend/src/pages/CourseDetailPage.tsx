@@ -156,6 +156,8 @@ export function CourseDetailPage() {
   const [courseDraftRecovered, setCourseDraftRecovered] = useState(false)
   const [courseEditDraft, setCourseEditDraft] = useState<CourseEditDraft | null>(null)
   const [courseEditRecovered, setCourseEditRecovered] = useState(false)
+  const [chapterCreateOpen, setChapterCreateOpen] = useState(false)
+  const [openSectionCreateIds, setOpenSectionCreateIds] = useState<Set<number>>(new Set())
   const [titleEditDirty, setTitleEditDirty] = useState(false)
   const [titleEditValue, setTitleEditValue] = useState('')
   const [materials, setMaterials] = useState<LearningMaterial[]>([])
@@ -227,7 +229,15 @@ export function CourseDetailPage() {
       if (key && restoreFormDraft(formDraftKey(key), form) && formIsDirty(form)) restoredKeys.push(key)
     })
     if (restoredKeys.length === 0) return
+    const restoredSectionIds = restoredKeys
+      .filter((key) => key.startsWith('section-create-'))
+      .map((key) => Number(key.replace('section-create-', '')))
+      .filter(Number.isFinite)
     const timer = window.setTimeout(() => {
+      if (restoredKeys.includes('chapter-create')) setChapterCreateOpen(true)
+      if (restoredSectionIds.length > 0) {
+        setOpenSectionCreateIds((current) => new Set([...current, ...restoredSectionIds]))
+      }
       setCourseDraftRecovered(true)
       setDirtyDraftKeys((currentKeys) => {
         if (restoredKeys.every((key) => currentKeys.has(key))) return currentKeys
@@ -266,6 +276,35 @@ export function CourseDetailPage() {
       nextKeys.delete(key)
       return nextKeys
     })
+  }
+
+  function focusCreateInput(formId: string) {
+    window.setTimeout(() => {
+      document.querySelector<HTMLInputElement>(`#${formId} input[name="title"]`)?.focus()
+    }, 0)
+  }
+
+  function openChapterCreator() {
+    setChapterCreateOpen(true)
+    focusCreateInput('chapter-create-form')
+  }
+
+  function openSectionCreator(chapterId: number) {
+    setOpenSectionCreateIds((current) => new Set([...current, chapterId]))
+    focusCreateInput(`section-create-form-${chapterId}`)
+  }
+
+  function closeCreateForm(form: HTMLFormElement, chapterId?: number) {
+    form.reset()
+    markDraftSaved(form)
+    if (chapterId === undefined) setChapterCreateOpen(false)
+    else {
+      setOpenSectionCreateIds((current) => {
+        const next = new Set(current)
+        next.delete(chapterId)
+        return next
+      })
+    }
   }
 
   function updateChapter(updated: Chapter) {
@@ -392,6 +431,7 @@ export function CourseDetailPage() {
       }))
       form.reset()
       markDraftSaved(form)
+      setChapterCreateOpen(false)
       setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '创建章节失败')
@@ -432,6 +472,11 @@ export function CourseDetailPage() {
       }))
       form.reset()
       markDraftSaved(form)
+      setOpenSectionCreateIds((current) => {
+        const next = new Set(current)
+        next.delete(chapter.id)
+        return next
+      })
       setError('')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '创建小节失败')
@@ -769,13 +814,44 @@ export function CourseDetailPage() {
         <div className="section-heading section-heading--spaced">
           <h2 id="outline-title">章节与小节</h2>
           <span className="count-label">{course.chapters.length} 个章节</span>
+          <button
+            className="secondary-button outline-create-button"
+            type="button"
+            aria-expanded={chapterCreateOpen}
+            aria-controls="chapter-create-form"
+            onClick={openChapterCreator}
+          >
+            <Plus size={15} />添加章节
+          </button>
         </div>
+
+        <form
+          id="chapter-create-form"
+          className="add-chapter-form"
+          data-dirty-key="chapter-create"
+          data-save-kind="chapter-create"
+          hidden={!chapterCreateOpen}
+          onSubmit={handleCreateChapter}
+        >
+          <input name="title" aria-label="章节标题" placeholder="新章节标题" required maxLength={200} />
+          <button className="primary-button" type="submit"><Plus size={16} />保存章节</button>
+          <button className="secondary-button" type="button" onClick={(event) => closeCreateForm(event.currentTarget.form!)}>取消</button>
+        </form>
 
         {course.chapters.map((chapter, chapterIndex) => (
           <article className="chapter-block" key={chapter.id}>
             <header className="chapter-header">
               <div><span>{String(chapterIndex + 1).padStart(2, '0')}</span><h3>{chapter.title}</h3></div>
               <div className="row-actions">
+                <button
+                  className="icon-button"
+                  type="button"
+                  title="添加小节"
+                  aria-label={`在${chapter.title}中添加小节`}
+                  aria-expanded={openSectionCreateIds.has(chapter.id)}
+                  aria-controls={`section-create-form-${chapter.id}`}
+                  onClick={() => openSectionCreator(chapter.id)}
+                ><Plus size={15} /></button>
                 <button className="icon-button" type="button" title="章节材料" aria-label={`${chapter.title}章节材料`} onClick={() => {
                   const scope = materialScopes.find((item) => item.value === `chapter-${chapter.id}`)
                   if (scope) void toggleMaterials(scope)
@@ -891,26 +967,40 @@ export function CourseDetailPage() {
                 </div>
                 )
               })}
-              {chapter.sections.length === 0 && <p className="inline-empty">本章还没有小节</p>}
+              {chapter.sections.length === 0 && (
+                <div className="inline-empty inline-empty-action">
+                  <span>本章还没有小节</span>
+                  <button className="secondary-button" type="button" onClick={() => openSectionCreator(chapter.id)}>
+                    <Plus size={15} />添加第一个小节
+                  </button>
+                </div>
+              )}
             </div>
 
             <form
+              id={`section-create-form-${chapter.id}`}
               className="inline-create-form"
               data-dirty-key={`section-create-${chapter.id}`}
               data-save-kind="section-create"
               data-entity-id={chapter.id}
+              hidden={!openSectionCreateIds.has(chapter.id)}
               onSubmit={(event) => handleCreateSection(event, chapter)}
             >
               <input name="title" aria-label={`在${chapter.title}中创建小节`} placeholder="小节标题" required maxLength={200} />
-              <button className="secondary-button" type="submit"><Plus size={15} />添加小节</button>
+              <button className="primary-button" type="submit"><Plus size={15} />保存小节</button>
+              <button className="secondary-button" type="button" onClick={(event) => closeCreateForm(event.currentTarget.form!, chapter.id)}>取消</button>
             </form>
           </article>
         ))}
 
-        <form className="add-chapter-form" data-dirty-key="chapter-create" data-save-kind="chapter-create" onSubmit={handleCreateChapter}>
-          <input name="title" aria-label="章节标题" placeholder="新章节标题" required maxLength={200} />
-          <button className="primary-button" type="submit"><Plus size={16} />添加章节</button>
-        </form>
+        {course.chapters.length === 0 && (
+          <div className="empty-state empty-state--compact outline-empty-state">
+            <p>还没有章节</p>
+            <button className="primary-button" type="button" onClick={openChapterCreator}>
+              <Plus size={16} />添加第一个章节
+            </button>
+          </div>
+        )}
         </section>
       </div>
 

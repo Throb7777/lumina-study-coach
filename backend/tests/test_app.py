@@ -16,6 +16,9 @@ def test_health_endpoint(client: TestClient) -> None:
         "status": "ok",
         "service": "learning-flow-coach-api",
         "version": "0.1.2",
+        "frontend_build_id": None,
+        "frontend_entry": None,
+        "frontend_ready": False,
     }
 
 
@@ -136,13 +139,52 @@ def test_static_assets_and_spa_fallback(tmp_path: Path, database_url: str) -> No
     static_dir = tmp_path / "dist"
     assets_dir = static_dir / "assets"
     assets_dir.mkdir(parents=True)
-    (static_dir / "index.html").write_text("<h1>Learning Flow Coach</h1>", encoding="utf-8")
+    index_html = (
+        "<h1>Learning Flow Coach</h1>"
+        '<script type="module" src="/assets/app.js"></script>'
+    )
+    (static_dir / "index.html").write_text(index_html, encoding="utf-8")
     (assets_dir / "app.js").write_text("console.log('ready')", encoding="utf-8")
     with TestClient(create_app(static_dir, database_url=database_url)) as client:
-        assert client.get("/").text == "<h1>Learning Flow Coach</h1>"
-        assert client.get("/status").text == "<h1>Learning Flow Coach</h1>"
-        assert client.get("/assets/app.js").text == "console.log('ready')"
+        index_response = client.get("/")
+        route_response = client.get("/status")
+        asset_response = client.get("/assets/app.js")
+
+        assert index_response.text == index_html
+        assert index_response.headers["cache-control"] == "no-store"
+        assert client.get("/index.html").headers["cache-control"] == "no-store"
+        assert route_response.text == index_html
+        assert route_response.headers["cache-control"] == "no-store"
+        assert asset_response.text == "console.log('ready')"
+        assert asset_response.headers["cache-control"] == (
+            "public, max-age=31536000, immutable"
+        )
+        assert client.get("/assets/missing.js").status_code == 404
+        assert client.get("/missing.css").status_code == 404
         assert client.get("/api/missing").status_code == 404
+
+        health = client.get("/api/health").json()
+        assert health["frontend_build_id"]
+        assert health["frontend_entry"] == "/assets/app.js"
+        assert health["frontend_ready"] is True
+
+
+def test_health_reports_incomplete_frontend_build(
+    tmp_path: Path, database_url: str
+) -> None:
+    static_dir = tmp_path / "dist"
+    static_dir.mkdir()
+    (static_dir / "index.html").write_text(
+        '<script type="module" src="/assets/missing.js"></script>',
+        encoding="utf-8",
+    )
+
+    with TestClient(create_app(static_dir, database_url=database_url)) as client:
+        response = client.get("/api/health")
+
+    assert response.status_code == 200
+    assert response.json()["frontend_ready"] is False
+    assert response.json()["frontend_entry"] == "/assets/missing.js"
 
 
 def test_restart_marks_stale_ai_runs_as_failed(tmp_path: Path, database_url: str) -> None:

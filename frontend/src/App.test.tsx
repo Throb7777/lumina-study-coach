@@ -368,6 +368,42 @@ describe('App', () => {
     expect(screen.getByRole('button', { name: '展开侧栏' })).toHaveAttribute('aria-expanded', 'false')
   })
 
+  it('resizes the expanded sidebar within bounds and persists its width', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses') return jsonResponse([])
+      if (input === '/api/onboarding') return jsonResponse({ pending: false })
+      throw new Error(`Unexpected request: ${input}`)
+    }))
+    const user = userEvent.setup()
+    const { container } = renderApp(['/courses'])
+    await screen.findByRole('heading', { name: 'MIT 18.06 线性代数示例' })
+    const resizer = screen.getByRole('separator', { name: '调整侧栏宽度' })
+
+    await user.click(resizer)
+    await user.keyboard('{Home}')
+    expect(resizer).toHaveAttribute('aria-valuenow', '144')
+    expect(container.querySelector('.app-shell')).toHaveStyle('--sidebar-expanded-width: 144px')
+    expect(container.querySelector('.app-shell')).toHaveClass('app-shell--sidebar-compact')
+
+    await user.keyboard('{ArrowRight}')
+    expect(resizer).toHaveAttribute('aria-valuenow', '152')
+    expect(localStorage.getItem('learning-flow-coach.sidebar-width')).toBe('152')
+
+    await user.keyboard('{End}')
+    expect(resizer).toHaveAttribute('aria-valuenow', '236')
+    expect(container.querySelector('.app-shell')).toHaveStyle('--sidebar-expanded-width: 236px')
+    expect(container.querySelector('.app-shell')).not.toHaveClass('app-shell--sidebar-compact')
+
+    fireEvent.pointerDown(resizer, { button: 0 })
+    await waitFor(() => {
+      expect(container.querySelector('.app-shell')).toHaveClass('app-shell--sidebar-resizing')
+    })
+    fireEvent.pointerMove(window, { clientX: 100 })
+    expect(resizer).toHaveAttribute('aria-valuenow', '144')
+    fireEvent.pointerUp(window)
+    expect(localStorage.getItem('learning-flow-coach.sidebar-width')).toBe('144')
+  })
+
   it('keeps the current page visible while the next route is loading', async () => {
     const courses = [{
       ...courseDetail,
@@ -808,6 +844,7 @@ describe('App', () => {
 
     renderApp(['/courses/1'])
 
+    await user.click(await screen.findByRole('button', { name: '添加章节' }))
     await user.type(await screen.findByLabelText('章节标题'), '第二章')
     await user.click(screen.getByRole('link', { name: '设置' }))
     const dialog = await screen.findByRole('dialog', { name: '还有内容没有保存' })
@@ -818,6 +855,44 @@ describe('App', () => {
       method: 'POST',
       body: JSON.stringify({ title: '第二章' }),
     }))
+  })
+
+  it('reveals chapter and section creation forms only when requested', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse(courseWithOutline)))
+    const user = userEvent.setup()
+
+    renderApp(['/courses/1'])
+
+    await screen.findByRole('heading', { name: '第一章' })
+    expect(screen.queryByLabelText('章节标题')).not.toBeVisible()
+    expect(screen.queryByLabelText('在第一章中创建小节')).not.toBeVisible()
+
+    await user.click(screen.getByRole('button', { name: '添加章节' }))
+    expect(screen.getByLabelText('章节标题')).toBeVisible()
+    expect(screen.getByLabelText('章节标题')).toHaveFocus()
+
+    await user.click(screen.getByRole('button', { name: '在第一章中添加小节' }))
+    expect(screen.getByLabelText('在第一章中创建小节')).toBeVisible()
+    expect(screen.getByLabelText('在第一章中创建小节')).toHaveFocus()
+  })
+
+  it('restores an inline chapter draft and reopens its form', async () => {
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse(courseDetail))
+      .mockImplementationOnce(() => jsonResponse(courseDetail))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    const firstRender = renderApp(['/courses/1'])
+    await user.click(await screen.findByRole('button', { name: '添加章节' }))
+    await user.type(screen.getByLabelText('章节标题'), '尚未保存的新章节')
+    firstRender.unmount()
+
+    renderApp(['/courses/1'])
+
+    await waitFor(() => expect(screen.getByLabelText('章节标题')).toBeVisible())
+    expect(screen.getByLabelText('章节标题')).toHaveValue('尚未保存的新章节')
+    expect(screen.getByText('已恢复课程草稿')).toBeInTheDocument()
   })
 
   it('saves recall content and completes the workflow node', async () => {

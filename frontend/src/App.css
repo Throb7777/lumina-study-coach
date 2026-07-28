@@ -52,7 +52,7 @@
 }
 
 .app-shell {
-  --sidebar-width: 236px;
+  --sidebar-width: var(--sidebar-expanded-width, 236px);
   display: grid;
   grid-template-columns: var(--sidebar-width) minmax(0, 1fr);
   min-height: 100vh;
@@ -219,6 +219,79 @@
   transition: opacity var(--motion-fade) ease;
 }
 
+.sidebar-resizer {
+  position: absolute;
+  z-index: 2;
+  top: 0;
+  right: 0;
+  width: 8px;
+  height: 100%;
+  border: 0;
+  cursor: col-resize;
+  outline: 0;
+  touch-action: none;
+}
+
+.sidebar-resizer::after {
+  position: absolute;
+  top: 0;
+  right: 0;
+  width: 2px;
+  height: 100%;
+  background: transparent;
+  content: "";
+  transition: background 140ms ease;
+}
+
+.sidebar-resizer:hover::after,
+.sidebar-resizer:focus-visible::after,
+.app-shell--sidebar-resizing .sidebar-resizer::after {
+  background: var(--accent);
+}
+
+.app-shell--sidebar-compact .sidebar {
+  padding-right: 6px;
+  padding-left: 6px;
+}
+
+.app-shell--sidebar-compact .sidebar-header {
+  gap: 6px;
+}
+
+.app-shell--sidebar-compact .brand {
+  gap: 6px;
+  padding-left: 0;
+}
+
+.app-shell--sidebar-compact .brand-mark {
+  width: 30px;
+  height: 30px;
+}
+
+.app-shell--sidebar-compact .brand-mark img {
+  width: 28px;
+  height: 28px;
+}
+
+.app-shell--sidebar-compact .nav-link {
+  padding-right: 8px;
+  padding-left: 8px;
+}
+
+.app-shell--sidebar-resizing {
+  cursor: col-resize;
+  user-select: none;
+  transition: none;
+}
+
+.app-shell--sidebar-resizing .route-progress {
+  transition: opacity 120ms ease;
+}
+
+.app-shell--sidebar-collapsed .sidebar-resizer {
+  display: none;
+}
+
 .app-shell--sidebar-collapsed .sidebar {
   padding-right: 10px;
   padding-left: 10px;
@@ -269,6 +342,66 @@
 
 .content--flow {
   width: min(100% - 64px, 1040px);
+}
+
+.route-error-page {
+  display: grid;
+  min-height: 100vh;
+  padding: 28px clamp(24px, 6vw, 80px);
+  background: var(--page);
+  color: var(--text);
+  grid-template-rows: auto 1fr;
+}
+
+.route-error-brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  width: fit-content;
+  font-size: 16px;
+  font-weight: 700;
+}
+
+.route-error-brand img {
+  width: 32px;
+  height: 32px;
+  border-radius: 7px;
+}
+
+.route-error-content {
+  align-self: center;
+  width: min(100%, 520px);
+  margin: 0 auto;
+  padding-bottom: 72px;
+}
+
+.route-error-icon {
+  margin-bottom: 18px;
+  color: var(--danger);
+}
+
+.route-error-icon--loading {
+  color: var(--accent);
+  animation: route-error-spin 900ms linear infinite;
+}
+
+.route-error-content h1 {
+  margin: 0;
+  font-size: 28px;
+  line-height: 1.3;
+}
+
+.route-error-content p {
+  margin: 12px 0 24px;
+  color: var(--text-secondary);
+  font-size: 15px;
+  line-height: 1.8;
+}
+
+.route-error-content .primary-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .context-page {
@@ -1384,7 +1517,13 @@ textarea {
   gap: 8px;
 }
 
+.inline-create-form[hidden],
+.add-chapter-form[hidden] {
+  display: none;
+}
+
 .inline-create-form {
+  margin-top: 12px;
   margin-left: 32px;
 }
 
@@ -1394,10 +1533,26 @@ textarea {
 }
 
 .add-chapter-form {
-  margin-top: 24px;
-  padding: 18px;
-  border: 1px dashed var(--border);
+  margin: 4px 0 16px;
+  padding: 12px;
+  border: 1px solid var(--border);
   border-radius: 8px;
+  background: var(--surface);
+}
+
+.outline-create-button {
+  flex: 0 0 auto;
+}
+
+.inline-empty-action {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.outline-empty-state {
+  margin-top: 16px;
 }
 
 .record-progress {
@@ -2715,6 +2870,12 @@ select:not(:disabled) {
   to { transform: translateX(370%); }
 }
 
+@keyframes route-error-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
 .index-filter-panel,
 .mistake-overview,
 .index-results {
@@ -3313,6 +3474,10 @@ select:not(:disabled) {
     display: none;
   }
 
+  .sidebar-resizer {
+    display: none;
+  }
+
   .app-shell--sidebar-collapsed .sidebar {
     padding: 14px 18px;
   }
@@ -3507,6 +3672,11 @@ select:not(:disabled) {
 
   .inline-create-form,
   .add-chapter-form {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .inline-empty-action {
     align-items: stretch;
     flex-direction: column;
   }

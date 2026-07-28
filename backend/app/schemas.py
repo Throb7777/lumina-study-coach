@@ -736,6 +736,10 @@ class NoteIndexItem(BaseModel):
 
 class NoteIndexIssue(BaseModel):
     section_id: int
+    course_id: int
+    course_name: str
+    chapter_id: int
+    chapter_title: str
     section_title: str
     detail: str
 
