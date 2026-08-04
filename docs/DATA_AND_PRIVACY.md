@@ -21,8 +21,11 @@ Network access occurs only for an explicit feature:
 - Downloading or refreshing a URL or supported transcript.
 - Signing in to Codex or Antigravity.
 - Running an external AI task.
-- Installing optional OCR data.
 - Downloading the optional semantic-search model.
+
+The Windows installer includes the OCR engine and its English and Simplified
+Chinese language data. PDF OCR runs locally and does not download a model or
+send the document to an OCR service.
 
 Reference material is treated as untrusted content. Lumina does not expose its
 local service beyond `127.0.0.1`.

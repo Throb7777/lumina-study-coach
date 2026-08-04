@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Throb7777/lumina-study-coach/releases/latest"><img alt="Latest release" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach"></a>
+  <a href="https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2"><img alt="Latest release" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach?include_prereleases"></a>
   <a href="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b7894">
@@ -32,9 +32,10 @@ Markdown files that remain usable in Obsidian.
 ## Download
 
 Download `install_Lumina-0.1.2.exe` from the
-[latest GitHub release](https://github.com/Throb7777/lumina-study-coach/releases/latest).
-The installer contains the web application, local service, and Python runtime.
-Node.js and Python are not required for normal use.
+[Lumina v0.1.2 release](https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2).
+The installer contains the web application, local service, Python runtime, and
+English and Simplified Chinese OCR support. Node.js, Python, and a separate
+Tesseract installation are not required for normal use.
 
 The preview installer is not code-signed yet, so Windows SmartScreen may ask
 you to confirm before running it. Verify the SHA-256 value published with the
@@ -47,7 +48,15 @@ release before installation.
 - Guides recall, active reconstruction, practice, correction, and next-step questions.
 - Generates 12-question practice sets with one-question-at-a-time answering and review.
 - Keeps structured mistakes, learning memory, and section notes searchable.
-- Imports PDF, web page, and supported public-video transcript materials.
+- Imports native-text and scanned PDFs, web pages, and supported public-video
+  transcripts.
+- Uses bundled English and Simplified Chinese OCR only for PDF pages that need
+  it.
+- Keeps text from successfully parsed PDF pages when another page fails, with
+  a clear warning.
+- Supports multiple priority materials at course, chapter, and section scope.
+- Manages chapter and section materials in a modal without displacing the
+  reading view.
 - Writes final section notes to `course/chapter/section.md` inside an Obsidian vault.
 - Stores courses, materials, settings, and indexes on your own computer.
 - Includes a read-only example course so the full workflow can be explored safely.
@@ -72,7 +81,7 @@ and current limitations.
 1. Install Lumina and launch it from the desktop or Start menu.
 2. Select **开始使用** in the one-time welcome dialog.
 3. Open the built-in example, or create a course and its first section.
-4. Add optional PDF or URL material.
+4. Add optional PDF or URL material. Scanned PDFs are handled automatically.
 5. Start a study record and complete the flow.
 6. Configure an Obsidian vault only when you are ready to save a section note.
 
@@ -90,8 +99,9 @@ Installed application files and learning data are separate:
 
 Lumina includes no analytics or telemetry. Network access occurs only for
 features the user starts, such as downloading a URL, signing in to an external
-CLI, running an AI task, OCR setup, or downloading the optional semantic-search
-model. See [Data and privacy](docs/DATA_AND_PRIVACY.md) for the full boundary.
+CLI, running an AI task, or downloading the optional semantic-search model.
+Bundled OCR runs locally. See [Data and privacy](docs/DATA_AND_PRIVACY.md) for
+the full boundary.
 
 Uninstalling Lumina keeps learning data by default. Choosing to delete it
 requires two confirmations and creates a final backup first.

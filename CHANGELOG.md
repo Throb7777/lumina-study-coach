@@ -25,6 +25,12 @@ All notable public changes to Lumina are documented in this file.
 - Allow multiple successfully parsed materials to be marked as priority
   material in the same course scope.
 
+### Notes
+
+- The v0.1.2 Windows assets were refreshed on 2026-08-04. The current
+  installer supersedes earlier v0.1.2 builds while preserving the same version
+  number and existing local learning data during an upgrade.
+
 ## [0.1.1] - 2026-07-28
 
 ### Fixed
