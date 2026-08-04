@@ -7,6 +7,7 @@ import re
 import shutil
 import socket
 import subprocess
+import sys
 import time
 from collections import Counter
 from dataclasses import dataclass
@@ -37,11 +38,11 @@ MAX_URL_BYTES = 8 * 1024 * 1024
 CHUNK_SIZE = 1800
 CHUNK_OVERLAP = 200
 MAX_CONTEXT_CHUNKS = 8
-MATERIAL_PARSER_VERSION = "ocr-hybrid-v3"
+MATERIAL_PARSER_VERSION = "ocr-hybrid-v4"
 REMOTE_RETRY_STATUSES = {429, 500, 502, 503, 504}
 REMOTE_MAX_ATTEMPTS = 3
 OCR_LANGUAGES = "chi_sim+eng"
-OCR_DPI = 200
+OCR_DPI = 300
 MIN_NATIVE_PAGE_CHARACTERS = 40
 
 
@@ -72,6 +73,21 @@ class HtmlExtraction:
     extracted_char_count: int
     candidate_char_count: int
     warnings: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
+class PdfExtraction:
+    chunks: list[tuple[str, int | None, str]]
+    total_pages: int
+    ocr_pages: int
+    failed_pages: tuple[int, ...] = ()
+
+    @property
+    def warning_text(self) -> str:
+        if not self.failed_pages:
+            return ""
+        pages = "、".join(str(page) for page in self.failed_pages)
+        return f"第 {pages} 页未能提取文字，其余页面已正常解析。"
 
 
 def validate_scope(
@@ -133,19 +149,29 @@ def scoped_materials(
     )
 
 
-def set_primary(session: Session, material: LearningMaterial) -> None:
-    if not material.is_primary:
+def set_primary(
+    session: Session,
+    material: LearningMaterial,
+    *,
+    ensure_default: bool = False,
+) -> None:
+    if material.status != MaterialStatus.READY:
+        material.is_primary = False
         return
-    others = session.scalars(
-        select(LearningMaterial).where(
+    if not ensure_default or material.is_primary:
+        return
+    existing_priority = session.scalar(
+        select(LearningMaterial.id).where(
             LearningMaterial.course_id == material.course_id,
             LearningMaterial.chapter_id == material.chapter_id,
             LearningMaterial.section_id == material.section_id,
+            LearningMaterial.status == MaterialStatus.READY,
+            LearningMaterial.is_primary.is_(True),
             LearningMaterial.id != material.id,
         )
     )
-    for other in others:
-        other.is_primary = False
+    if existing_priority is None:
+        material.is_primary = True
 
 
 def chunk_text(text: str, heading: str = "", page_number: int | None = None):
@@ -178,25 +204,37 @@ def _page_needs_ocr(page, text: str) -> bool:
         return True
 
 
-def _tesseract_executable() -> str | None:
-    executable = shutil.which("tesseract")
-    if executable:
-        return executable
-    program_files = os.environ.get("PROGRAMFILES")
-    if program_files:
-        candidate = Path(program_files) / "Tesseract-OCR" / "tesseract.exe"
-        if candidate.is_file():
-            return str(candidate)
+def _bundled_ocr_root() -> Path | None:
+    configured = os.environ.get("LUMINA_OCR_RUNTIME")
+    candidates = [Path(configured)] if configured else []
+    bundle_root = getattr(sys, "_MEIPASS", None)
+    if bundle_root:
+        candidates.append(Path(bundle_root) / "ocr")
+    candidates.append(Path(__file__).resolve().parents[2] / "installer" / "ocr-runtime")
+    for candidate in candidates:
+        if (candidate / "tesseract.exe").is_file():
+            return candidate
     return None
 
 
-def _bundled_tessdata(path: Path) -> Path | None:
-    parents = path.resolve().parents
-    runtime_root = next((parent for parent in parents if parent.name == "runtime-data"), None)
+def _tesseract_executable() -> str | None:
+    bundled = _bundled_ocr_root()
+    if bundled is not None:
+        return str(bundled / "tesseract.exe")
+    executable = shutil.which("tesseract")
+    return executable or None
+
+
+def _bundled_tessdata() -> Path | None:
+    runtime_root = _bundled_ocr_root()
     if runtime_root is None:
         return None
-    tessdata = runtime_root / "ocr" / "tessdata"
-    required = [tessdata / "chi_sim.traineddata", tessdata / "eng.traineddata"]
+    tessdata = runtime_root / "tessdata"
+    required = [
+        tessdata / "chi_sim.traineddata",
+        tessdata / "chi_sim_vert.traineddata",
+        tessdata / "eng.traineddata",
+    ]
     return tessdata if all(item.is_file() for item in required) else None
 
 
@@ -204,8 +242,7 @@ def _ocr_pdf_page(path: Path, page_index: int) -> str:
     executable = _tesseract_executable()
     if not executable:
         raise MaterialError(
-            "扫描 PDF 需要 Tesseract OCR。请安装 Tesseract，并确认中文 chi_sim 与英文 eng "
-            "语言包可用，然后在材料库点击重新解析。"
+            "内置 OCR 运行时缺失或损坏，请重新运行 Lumina 安装程序进行修复。"
         )
     try:
         import pypdfium2 as pdfium
@@ -224,37 +261,44 @@ def _ocr_pdf_page(path: Path, page_index: int) -> str:
                     image.close()
             finally:
                 page.close()
-        command = [
-            executable,
-            str(image_path),
-            "stdout",
-        ]
-        tessdata = _bundled_tessdata(path)
-        if tessdata is not None:
-            command.extend(["--tessdata-dir", str(tessdata)])
-        command.extend([
-            "-l",
-            OCR_LANGUAGES,
-            "--psm",
-            "6",
-        ])
-        try:
-            completed = subprocess.run(
-                command,
-                capture_output=True,
-                text=True,
-                encoding="utf-8",
-                errors="replace",
-                timeout=90,
-                check=False,
-                creationflags=0x08000000 if os.name == "nt" else 0,
-            )
-        except (OSError, subprocess.TimeoutExpired) as error:
-            raise MaterialError(f"第 {page_index + 1} 页 OCR 失败：{error}") from error
-        if completed.returncode != 0:
-            detail = completed.stderr.strip() or "请检查 Tesseract 语言包"
-            raise MaterialError(f"第 {page_index + 1} 页 OCR 失败：{detail}")
-        return completed.stdout.strip()
+        tessdata = _bundled_tessdata()
+        if _bundled_ocr_root() is not None and tessdata is None:
+            raise MaterialError("内置 OCR 中文或英文语言包缺失，请重新安装或修复 Lumina。")
+        best_text = ""
+        for page_segmentation_mode in (3, 6, 11):
+            command = [executable, str(image_path), "stdout"]
+            if tessdata is not None:
+                command.extend(["--tessdata-dir", str(tessdata)])
+            command.extend([
+                "-l",
+                OCR_LANGUAGES,
+                "--oem",
+                "1",
+                "--psm",
+                str(page_segmentation_mode),
+            ])
+            try:
+                completed = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    encoding="utf-8",
+                    errors="replace",
+                    timeout=90,
+                    check=False,
+                    creationflags=0x08000000 if os.name == "nt" else 0,
+                )
+            except (OSError, subprocess.TimeoutExpired) as error:
+                raise MaterialError(f"第 {page_index + 1} 页 OCR 失败：{error}") from error
+            if completed.returncode != 0:
+                detail = completed.stderr.strip() or "内置 OCR 运行失败"
+                raise MaterialError(f"第 {page_index + 1} 页 OCR 失败：{detail}")
+            candidate = completed.stdout.strip()
+            if len(re.sub(r"\s+", "", candidate)) > len(re.sub(r"\s+", "", best_text)):
+                best_text = candidate
+            if len(re.sub(r"\s+", "", best_text)) >= MIN_NATIVE_PAGE_CHARACTERS:
+                break
+        return best_text
 
 
 def _ocr_cache_path(path: Path, source_digest: str, page_number: int) -> Path:
@@ -265,27 +309,61 @@ def _ocr_cache_path(path: Path, source_digest: str, page_number: int) -> Path:
     return material_root / "ocr-cache" / f"{key}.txt"
 
 
-def extract_pdf(path: Path) -> list[tuple[str, int | None, str]]:
+def extract_pdf_detailed(path: Path) -> PdfExtraction:
     try:
         reader = PdfReader(path)
     except Exception as error:
         raise MaterialError(f"无法读取 PDF：{error}") from error
+    if getattr(reader, "is_encrypted", False):
+        try:
+            unlocked = reader.decrypt("")
+        except Exception as error:
+            raise MaterialError("PDF 已加密，需要先移除密码保护后再添加") from error
+        if not unlocked:
+            raise MaterialError("PDF 已加密，需要先移除密码保护后再添加")
+    try:
+        total_pages = len(reader.pages)
+    except Exception as error:
+        raise MaterialError(f"无法读取 PDF 页面：{error}") from error
     source_digest = content_hash(path.read_bytes())
     chunks: list[tuple[str, int | None, str]] = []
-    for page_number, page in enumerate(reader.pages, start=1):
-        text = page.extract_text() or ""
-        if _page_needs_ocr(page, text):
-            cache_path = _ocr_cache_path(path, source_digest, page_number)
-            if cache_path.is_file():
-                text = cache_path.read_text(encoding="utf-8")
-            else:
-                text = _ocr_pdf_page(path, page_number - 1)
-                cache_path.parent.mkdir(parents=True, exist_ok=True)
-                cache_path.write_text(text, encoding="utf-8")
+    failed_pages: list[int] = []
+    page_errors: list[str] = []
+    ocr_pages = 0
+    for page_number in range(1, total_pages + 1):
+        try:
+            page = reader.pages[page_number - 1]
+            text = page.extract_text() or ""
+            if _page_needs_ocr(page, text):
+                ocr_pages += 1
+                cache_path = _ocr_cache_path(path, source_digest, page_number)
+                if cache_path.is_file():
+                    text = cache_path.read_text(encoding="utf-8")
+                else:
+                    text = _ocr_pdf_page(path, page_number - 1)
+                    cache_path.parent.mkdir(parents=True, exist_ok=True)
+                    cache_path.write_text(text, encoding="utf-8")
+        except Exception as error:
+            failed_pages.append(page_number)
+            page_errors.append(str(error))
+            continue
         chunks.extend(chunk_text(text, f"第 {page_number} 页", page_number))
     if not chunks:
-        raise MaterialError("PDF 没有可提取文本；如为扫描件，请确认 OCR 语言包后重新解析")
-    return chunks
+        if failed_pages:
+            pages = "、".join(str(page) for page in failed_pages)
+            detail = page_errors[0] if page_errors else "未知错误"
+            raise MaterialError(f"PDF 第 {pages} 页解析失败，未能提取任何可用文字：{detail}")
+        raise MaterialError("PDF 没有可提取文字，请确认文件未损坏或加密")
+    return PdfExtraction(
+        chunks=chunks,
+        total_pages=total_pages,
+        ocr_pages=ocr_pages,
+        failed_pages=tuple(failed_pages),
+    )
+
+
+def extract_pdf(path: Path) -> list[tuple[str, int | None, str]]:
+    return extract_pdf_detailed(path).chunks
 
 
 def validate_public_url(url: str) -> None:

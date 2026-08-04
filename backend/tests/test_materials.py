@@ -349,8 +349,49 @@ def test_scanned_pdf_pages_use_cached_ocr_text(tmp_path: Path, monkeypatch) -> N
 def test_scanned_pdf_without_tesseract_has_actionable_retry_message(monkeypatch) -> None:
     monkeypatch.setattr(materials_module, "_tesseract_executable", lambda: None)
 
-    with pytest.raises(MaterialError, match="Tesseract OCR.*重新解析"):
+    with pytest.raises(MaterialError, match="内置 OCR 运行时.*修复"):
         materials_module._ocr_pdf_page(Path("scan.pdf"), 0)
+
+
+def test_mixed_pdf_keeps_usable_pages_when_one_ocr_page_fails(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    class FakePage:
+        images = [object()]
+
+        def __init__(self, text: str) -> None:
+            self.text = text
+
+        def extract_text(self) -> str:
+            return self.text
+
+    class FakeReader:
+        pages = [
+            FakePage("Native page text " * 10),
+            FakePage(""),
+            FakePage(""),
+        ]
+
+    source = tmp_path / "versions" / "mixed.pdf"
+    source.parent.mkdir()
+    source.write_bytes(b"%PDF-mixed-fixture")
+    monkeypatch.setattr(materials_module, "PdfReader", lambda _: FakeReader())
+
+    def fake_ocr(_path: Path, page_index: int) -> str:
+        if page_index == 1:
+            raise MaterialError("page failed")
+        return "第三页 OCR 正文"
+
+    monkeypatch.setattr(materials_module, "_ocr_pdf_page", fake_ocr)
+
+    result = materials_module.extract_pdf_detailed(source)
+
+    assert result.total_pages == 3
+    assert result.ocr_pages == 2
+    assert result.failed_pages == (2,)
+    assert {chunk[1] for chunk in result.chunks} == {1, 3}
+    assert "第 2 页" in result.warning_text
 
 
 def test_hybrid_index_uses_local_full_text_and_keeps_primary_database_canonical(
@@ -472,6 +513,7 @@ def test_failed_url_material_is_kept_and_can_be_reparsed(
     assert reparsed.json()["refresh_status"] == "succeeded"
     assert reparsed.json()["material"]["status"] == "ready"
     assert reparsed.json()["material"]["chunk_count"] > 0
+    assert reparsed.json()["material"]["is_primary"] is True
 
 
 def test_url_material_scope_selection_and_ai_context(
@@ -569,6 +611,46 @@ def test_first_material_in_a_scope_becomes_primary(
 
     assert created.status_code == 201
     assert created.json()["is_primary"] is True
+
+
+def test_multiple_ready_materials_can_be_marked_as_priority(
+    client: TestClient,
+    monkeypatch,
+) -> None:
+    monkeypatch.setattr(
+        api_module,
+        "fetch_url",
+        lambda url: (
+            url,
+            "Priority material",
+            f"<html><main>Distinct content for {url}</main></html>".encode(),
+        ),
+    )
+    course, chapter, section, _ = create_learning_scope(client)
+    payload = {
+        "course_id": course["id"],
+        "chapter_id": chapter["id"],
+        "section_id": section["id"],
+    }
+    first = client.post(
+        "/api/materials/url",
+        json={**payload, "title": "重点一", "url": "https://example.test/priority-one"},
+    ).json()
+    second = client.post(
+        "/api/materials/url",
+        json={**payload, "title": "重点二", "url": "https://example.test/priority-two"},
+    ).json()
+
+    assert first["is_primary"] is True
+    assert second["is_primary"] is False
+    promoted = client.patch(
+        f"/api/materials/{second['id']}",
+        json={"is_primary": True},
+    )
+    assert promoted.status_code == 200
+
+    materials = client.get(f"/api/materials?course_id={course['id']}").json()
+    assert {item["title"] for item in materials if item["is_primary"]} == {"重点一", "重点二"}
 
 
 def test_material_scope_validation_and_failed_pdf(

@@ -7,11 +7,30 @@ project_root = Path(SPECPATH).resolve().parent
 backend_root = project_root / "backend"
 console_build = os.environ.get("LUMINA_CONSOLE_BUILD") == "1"
 version_file = os.environ.get("LUMINA_VERSION_FILE")
+ocr_runtime = project_root / "installer" / "ocr-runtime"
+required_ocr_files = (
+    ocr_runtime / "tesseract.exe",
+    ocr_runtime / "tessdata" / "eng.traineddata",
+    ocr_runtime / "tessdata" / "chi_sim.traineddata",
+    ocr_runtime / "tessdata" / "chi_sim_vert.traineddata",
+)
+missing_ocr_files = [str(path) for path in required_ocr_files if not path.is_file()]
+if missing_ocr_files:
+    raise SystemExit(
+        "Bundled OCR runtime is incomplete. Run launcher/prepare-ocr-runtime.ps1 first. "
+        f"Missing: {', '.join(missing_ocr_files)}"
+    )
 
 datas = [
     (str(project_root / "frontend" / "dist"), "frontend/dist"),
     (str(backend_root / "alembic.ini"), "."),
-    (str(backend_root / "alembic"), "alembic"),
+    (str(backend_root / "alembic" / "env.py"), "alembic"),
+    (str(backend_root / "alembic" / "script.py.mako"), "alembic"),
+    (str(ocr_runtime), "ocr"),
+]
+datas += [
+    (str(migration), "alembic/versions")
+    for migration in sorted((backend_root / "alembic" / "versions").glob("*.py"))
 ]
 binaries = []
 hiddenimports = collect_submodules("app")

@@ -4534,12 +4534,6 @@ select:not(:disabled) {
 
 }
 
-.course-materials {
-  margin: 28px 0 34px;
-  padding-bottom: 30px;
-  border-bottom: 1px solid var(--border);
-}
-
 .material-library {
   display: grid;
   gap: 14px;

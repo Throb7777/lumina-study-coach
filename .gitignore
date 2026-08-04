@@ -27,6 +27,7 @@ data/
 !frontend/src/data/example-course.json
 !frontend/src/data/EXAMPLE_LICENSE.md
 runtime-data/
+installer/ocr-runtime/
 exports/
 backups/
 

@@ -19,6 +19,7 @@ $Spec = Join-Path $Root 'installer\lumina.spec'
 $InnoScript = Join-Path $Root 'installer\Lumina.iss'
 $Python = Join-Path $Backend '.venv\Scripts\python.exe'
 $VersionFile = Join-Path $Root 'VERSION'
+$OcrRuntime = Join-Path $Root 'installer\ocr-runtime'
 
 if ([string]::IsNullOrWhiteSpace($Version)) {
     if (-not (Test-Path -LiteralPath $VersionFile -PathType Leaf)) {
@@ -55,7 +56,48 @@ function Find-InnoCompiler {
     throw 'Inno Setup 6 compiler ISCC.exe was not found.'
 }
 
+function Invoke-InnoCompiler(
+    [string]$Compiler,
+    [string[]]$Arguments
+) {
+    if ($Root.Length -lt 100) {
+        & $Compiler @Arguments $InnoScript | Out-Host
+        return $LASTEXITCODE
+    }
+
+    $drive = 90..80 |
+        ForEach-Object { '{0}:' -f [char]$_ } |
+        Where-Object { -not (Test-Path "$_\") } |
+        Select-Object -First 1
+    if (-not $drive) {
+        throw 'No temporary drive letter is available for the Inno Setup long-path workaround.'
+    }
+
+    & subst.exe $drive $Root
+    if ($LASTEXITCODE -ne 0) {
+        throw "Could not map temporary build drive $drive."
+    }
+    try {
+        & $Compiler @Arguments "$drive\installer\Lumina.iss" | Out-Host
+        $exitCode = $LASTEXITCODE
+    }
+    finally {
+        & subst.exe $drive /D | Out-Null
+    }
+    return $exitCode
+}
+
 Require-Command 'uv.exe' | Out-Null
+foreach ($relativePath in @(
+    'tesseract.exe',
+    'tessdata\eng.traineddata',
+    'tessdata\chi_sim.traineddata',
+    'tessdata\chi_sim_vert.traineddata'
+)) {
+    if (-not (Test-Path -LiteralPath (Join-Path $OcrRuntime $relativePath) -PathType Leaf)) {
+        throw 'Bundled OCR runtime is incomplete. Run launcher\prepare-ocr-runtime.ps1 before building.'
+    }
+}
 if (-not $SkipFrontend) {
     Require-Command 'npm.cmd' | Out-Null
     Push-Location $Frontend
@@ -165,8 +207,8 @@ if (-not $SkipInstaller) {
     if ($QaBuild) {
         $IsccArguments += '/DQaBuild'
     }
-    & $Iscc @IsccArguments $InnoScript
-    if ($LASTEXITCODE -ne 0) {
+    $InnoExitCode = Invoke-InnoCompiler $Iscc $IsccArguments
+    if ($InnoExitCode -ne 0) {
         throw 'Lumina installer build failed.'
     }
 }

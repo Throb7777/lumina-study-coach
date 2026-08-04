@@ -876,6 +876,26 @@ describe('App', () => {
     expect(screen.getByLabelText('在第一章中创建小节')).toHaveFocus()
   })
 
+  it('opens chapter materials in a fixed-scope dialog', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses/1') return jsonResponse(courseWithOutline)
+      if (input === '/api/materials?course_id=1') return jsonResponse([])
+      throw new Error(`Unexpected request: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/courses/1'])
+    const trigger = await screen.findByRole('button', { name: '第一章章节材料' })
+    await user.click(trigger)
+
+    const dialog = await screen.findByRole('dialog', { name: '第一章材料' })
+    expect(within(dialog).getByText(/固定用于当前课程范围/)).toBeInTheDocument()
+    expect(within(dialog).getByText(/还没有材料/)).toBeInTheDocument()
+    expect(document.querySelector('.course-materials')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledWith('/api/materials?course_id=1', expect.any(Object))
+  })
+
   it('restores an inline chapter draft and reopens its form', async () => {
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => jsonResponse(courseDetail))

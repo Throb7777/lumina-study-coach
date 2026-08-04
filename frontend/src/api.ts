@@ -304,6 +304,10 @@ export interface LearningMaterial {
   original_name: string
   status: MaterialStatus
   error_text: string
+  warning_text?: string
+  total_pages?: number
+  ocr_pages?: number
+  failed_pages?: number
   last_refresh_status?: 'idle' | 'running' | 'succeeded' | 'failed'
   last_refresh_error?: string
   last_refresh_at?: string | null

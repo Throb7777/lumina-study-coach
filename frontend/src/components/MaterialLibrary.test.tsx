@@ -175,4 +175,41 @@ describe('MaterialLibrary', () => {
     expect(await screen.findByRole('status')).toHaveTextContent(/仍在使用 Yale 视频字幕.*上次成功的版本/)
     expect(changed).toHaveBeenCalledOnce()
   })
+
+  it('shows multiple priority materials and exposes independent toggles', async () => {
+    const base = {
+      course_id: 3,
+      course_name: '线性代数',
+      chapter_id: null,
+      chapter_title: '',
+      section_id: null,
+      section_title: '',
+      source_type: 'pdf' as const,
+      source_url: '',
+      status: 'ready' as const,
+      error_text: '',
+      warning_text: '',
+      original_name: 'material.pdf',
+      is_primary: true,
+      chunk_count: 2,
+    }
+    const materials = [
+      { ...base, id: 10, title: '教材 A' },
+      { ...base, id: 11, title: '教材 B' },
+    ]
+    const fetchMock = vi.fn(() => jsonResponse({ ...materials[0], is_primary: false }))
+    vi.stubGlobal('fetch', fetchMock)
+    const changed = vi.fn()
+    const user = userEvent.setup()
+
+    render(<MaterialLibrary materials={materials} onChanged={changed} />)
+
+    expect(screen.getAllByText('重点材料')).toHaveLength(2)
+    await user.click(screen.getByRole('button', { name: '取消 教材 A 的重点材料标记' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/materials/10',
+      expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ is_primary: false }) }),
+    )
+    expect(changed).toHaveBeenCalledOnce()
+  })
 })

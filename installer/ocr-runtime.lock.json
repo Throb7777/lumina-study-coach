@@ -1,0 +1,16 @@
+{
+  "tesseract": {
+    "package_id": "tesseract-ocr.tesseract",
+    "version": "5.5.0.20241111",
+    "installer_sha256": "F3FC4236425B690C8BE756F35793F77394EE004BE0A6460A440C754D892F68BC"
+  },
+  "tessdata": {
+    "repository": "https://github.com/tesseract-ocr/tessdata_best",
+    "tag": "4.1.0",
+    "files": {
+      "eng.traineddata": "8280AED0782FE27257A68EA10FE7EF324CA0F8D85BD2FD145D1C2B560BCB66BA",
+      "chi_sim.traineddata": "4FEF2D1306C8E87616D4D3E4C6C67FAF5D44BE3342290CF8F2F0F6E3AA7E735B",
+      "chi_sim_vert.traineddata": "EA672A78157199C333AA12EC4E74550077689B545DF5FC770903716850C8B2E5"
+    }
+  }
+}

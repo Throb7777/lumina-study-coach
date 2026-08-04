@@ -45,6 +45,19 @@ uv run --project backend python scripts/check_release_metadata.py
 
 ## Windows Installer
 
+Windows packages include a local Tesseract runtime and the English, Simplified
+Chinese, and vertical Simplified Chinese models. Prepare the ignored runtime
+directory before building:
+
+```powershell
+.\launcher\prepare-ocr-runtime.ps1 -SourceDirectory C:\path\to\verified\Tesseract-OCR
+```
+
+The source directory must include the DLLs used by `tesseract.exe` and the
+three model files under `tessdata\`. Versions and model SHA-256 values are
+pinned in `installer\ocr-runtime.lock.json`; preparation and release builds
+fail when required OCR assets are missing or do not match the lock file.
+
 Run `build-installer.cmd`. The build reads the release number from `VERSION`,
 builds the frontend, creates the PyInstaller bundle, and compiles the Inno Setup
 installer. Outputs are written under the ignored `output/` directory.

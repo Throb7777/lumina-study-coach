@@ -27,14 +27,15 @@ NonCommercial-ShareAlike 4.0 International (CC BY-NC-SA 4.0), not under the
 repository's Apache License 2.0. Its source attribution is also displayed in
 the application and documented in `frontend/src/data/EXAMPLE_LICENSE.md`.
 
-## Optional local material processing
+## Local material processing
 
-Lumina can optionally use the following local components. They are not part of
-the repository source license and retain their own licenses:
+Lumina uses the following local components. They are not part of the repository
+source license and retain their own licenses:
 
-- Tesseract OCR and the `tessdata_fast` `chi_sim` / `eng` language data:
-  Apache License 2.0. Language data is downloaded only after user confirmation
-  and is stored under the ignored `runtime-data/ocr/` directory.
+- Tesseract OCR and the `tessdata_best` `chi_sim` / `chi_sim_vert` / `eng`
+  language data:
+  Apache License 2.0. Windows release packages include the OCR runtime and all
+  three language files so PDF parsing does not require a separate installation.
 - `pypdfium2` and PDFium for rendering scanned PDF pages: Apache License 2.0
   and BSD-style component licenses as documented by that project.
 - FastEmbed and the optional

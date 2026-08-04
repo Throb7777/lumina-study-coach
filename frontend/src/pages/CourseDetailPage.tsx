@@ -164,35 +164,30 @@ export function CourseDetailPage() {
   const [materialsLoading, setMaterialsLoading] = useState(false)
   const [materialsOpen, setMaterialsOpen] = useState(false)
   const [materialScope, setMaterialScope] = useState<MaterialScopeOption | null>(null)
+  const [materialDialogTrigger, setMaterialDialogTrigger] = useState<HTMLElement | null>(null)
+  const [materialError, setMaterialError] = useState('')
   const [courseCompletionBusy, setCourseCompletionBusy] = useState(false)
   const [expandedHistorySectionId, setExpandedHistorySectionId] = useState<number | null>(
     () => readExpandedHistory(routeData.course?.id),
   )
   const [showAllHistory, setShowAllHistory] = useState(false)
   const pageRef = useRef<HTMLElement>(null)
-  const materialsPanelRef = useRef<HTMLElement>(null)
   const outlineDraftSignature = course
     ? `${course.id}:${(course.chapters ?? []).map((chapter) => chapter.id).join(',')}`
     : ''
 
-  async function toggleMaterials(scope: MaterialScopeOption) {
-    if (materialsOpen && materialScope?.value === scope.value) {
-      setMaterialsOpen(false)
-      return
-    }
+  async function openMaterials(scope: MaterialScopeOption, trigger: HTMLElement) {
     if (!course) return
+    setMaterialScope(scope)
+    setMaterialDialogTrigger(trigger)
+    setMaterialsOpen(true)
     setMaterialsLoading(true)
-    setError('')
+    setMaterialError('')
     try {
       const result = await api.listMaterials(course.id)
       setMaterials(Array.isArray(result) ? result : [])
-      setMaterialScope(scope)
-      setMaterialsOpen(true)
-      window.setTimeout(() => {
-        materialsPanelRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' })
-      }, 0)
     } catch (requestError) {
-      setError(requestError instanceof Error ? requestError.message : '读取课程材料失败')
+      setMaterialError(requestError instanceof Error ? requestError.message : '读取材料失败')
     } finally {
       setMaterialsLoading(false)
     }
@@ -759,8 +754,8 @@ export function CourseDetailPage() {
                 {courseCompletionBusy ? '正在整理' : '完成课程'}
               </button>
             )}
-            <button className="secondary-button" type="button" disabled={materialsLoading} onClick={() => void toggleMaterials(courseMaterialScope)}>
-              <Library size={16} />{materialsOpen && materialScope?.value === courseMaterialScope.value ? '收起课程材料' : '课程材料'}
+            <button className="secondary-button" type="button" onClick={(event) => void openMaterials(courseMaterialScope, event.currentTarget)}>
+              <Library size={16} />课程材料
             </button>
             <Link className="secondary-button inline-link-button" to={`/courses/${course.id}/memory`}>
               <Brain size={16} />学习记忆
@@ -787,26 +782,6 @@ export function CourseDetailPage() {
             <div className="course-completion-summary__content">
               <MarkdownContent content={course.completion_summary} />
             </div>
-          </section>
-        )}
-
-        {materialsOpen && (
-          <section ref={materialsPanelRef} className="course-materials" aria-label="课程参考材料">
-            <div className="section-heading section-heading--spaced">
-              <div><h2>{materialScope?.label}材料</h2><p>此处添加的材料固定用于这个范围。</p></div>
-            </div>
-            <MaterialLibrary
-              key={materialScope?.value}
-              materials={visibleMaterials}
-              scopeOptions={materialScope ? [materialScope] : [courseMaterialScope]}
-              defaultScope={materialScope?.value ?? courseMaterialScope.value}
-              showScopeSelect={false}
-              allowScopeEdit={false}
-              onChanged={async () => {
-                const result = await api.listMaterials(course.id)
-                setMaterials(Array.isArray(result) ? result : [])
-              }}
-            />
           </section>
         )}
 
@@ -852,9 +827,9 @@ export function CourseDetailPage() {
                   aria-controls={`section-create-form-${chapter.id}`}
                   onClick={() => openSectionCreator(chapter.id)}
                 ><Plus size={15} /></button>
-                <button className="icon-button" type="button" title="章节材料" aria-label={`${chapter.title}章节材料`} onClick={() => {
+                <button className="icon-button" type="button" title="章节材料" aria-label={`${chapter.title}章节材料`} onClick={(event) => {
                   const scope = materialScopes.find((item) => item.value === `chapter-${chapter.id}`)
-                  if (scope) void toggleMaterials(scope)
+                  if (scope) void openMaterials(scope, event.currentTarget)
                 }}><Library size={15} /></button>
                 <button className="icon-button" type="button" title="修改章节" aria-label={`修改章节 ${chapter.title}`} onClick={(event) => openEditor({ kind: 'chapter', chapter }, event.currentTarget)}><Pencil size={15} /></button>
                 <button className="icon-button icon-button--danger" type="button" title="删除章节" aria-label={`删除章节 ${chapter.title}`} onClick={(event) => openConfirmation({ kind: 'delete-chapter', chapter }, event.currentTarget)}><Trash2 size={15} /></button>
@@ -886,9 +861,9 @@ export function CourseDetailPage() {
                       {Object.entries(statusLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}
                     </select>
                     <div className="row-actions">
-                      <button className="icon-button" type="button" title="小节材料" aria-label={`${section.title}小节材料`} onClick={() => {
+                      <button className="icon-button" type="button" title="小节材料" aria-label={`${section.title}小节材料`} onClick={(event) => {
                         const scope = materialScopes.find((item) => item.value === `section-${section.id}`)
-                        if (scope) void toggleMaterials(scope)
+                        if (scope) void openMaterials(scope, event.currentTarget)
                       }}><Library size={15} /></button>
                       <button className="icon-button" type="button" title="修改小节" aria-label={`修改小节 ${section.title}`} onClick={(event) => openEditor({ kind: 'section', section }, event.currentTarget)}><Pencil size={15} /></button>
                       <button className="icon-button icon-button--danger" type="button" title="删除小节" aria-label={`删除小节 ${section.title}`} onClick={(event) => openConfirmation({ kind: 'delete-section', section }, event.currentTarget)}><Trash2 size={15} /></button>
@@ -1105,6 +1080,34 @@ export function CourseDetailPage() {
               onConfirm={handleConfirmAction}
             />
       )}
+      <AppDialog
+        open={materialsOpen}
+        title={`${materialScope?.label ?? '当前范围'}材料`}
+        description="在此处添加的材料固定用于当前课程范围。"
+        size="workspace"
+        busy={materialsLoading}
+        closeOnBackdrop={false}
+        returnFocusTo={materialDialogTrigger}
+        onClose={() => setMaterialsOpen(false)}
+      >
+        {materialError && <p className="inline-error" role="alert">{materialError}</p>}
+        {materialsLoading ? (
+          <p className="muted" role="status">正在读取材料...</p>
+        ) : (
+          <MaterialLibrary
+            key={materialScope?.value}
+            materials={visibleMaterials}
+            scopeOptions={materialScope ? [materialScope] : [courseMaterialScope]}
+            defaultScope={materialScope?.value ?? courseMaterialScope.value}
+            showScopeSelect={false}
+            allowScopeEdit={false}
+            onChanged={async () => {
+              const result = await api.listMaterials(course.id)
+              setMaterials(Array.isArray(result) ? result : [])
+            }}
+          />
+        )}
+      </AppDialog>
       <UnsavedChangesGuard
         dirty={dirtyDraftKeys.size > 0 || hasEditDraft}
         onDiscard={discardAllCourseDrafts}

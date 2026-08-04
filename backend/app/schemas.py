@@ -550,6 +550,10 @@ class MaterialRead(BaseModel):
     original_name: str
     status: MaterialStatus
     error_text: str
+    warning_text: str
+    total_pages: int
+    ocr_pages: int
+    failed_pages: int
     last_refresh_status: MaterialRefreshStatus
     last_refresh_error: str
     last_refresh_at: datetime | None

@@ -4,12 +4,26 @@ All notable public changes to Lumina are documented in this file.
 
 ## [0.1.2] - 2026-07-28
 
+### Added
+
+- Bundle the English and Simplified Chinese OCR runtime in the Windows
+  installer so scanned PDFs work without a separate Tesseract installation.
+- Report partial PDF parsing results and failed page counts without discarding
+  text extracted successfully from other pages.
+
 ### Fixed
 
 - Prevent course header action labels from collapsing into vertical text at
   intermediate viewport widths.
 - Prevent completed section rows and expanded study history from overflowing
   the course page in standard and large font modes.
+- Present chapter and section materials in a modal instead of expanding them at
+  the top of the course page.
+
+### Changed
+
+- Allow multiple successfully parsed materials to be marked as priority
+  material in the same course scope.
 
 ## [0.1.1] - 2026-07-28
 

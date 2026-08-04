@@ -383,6 +383,14 @@ class LearningMaterial(TimestampMixin, Base):
         nullable=False,
     )
     error_text: Mapped[str] = mapped_column(Text(), default="", server_default="", nullable=False)
+    warning_text: Mapped[str] = mapped_column(Text(), default="", server_default="", nullable=False)
+    total_pages: Mapped[int] = mapped_column(
+        Integer(), default=0, server_default="0", nullable=False
+    )
+    ocr_pages: Mapped[int] = mapped_column(Integer(), default=0, server_default="0", nullable=False)
+    failed_pages: Mapped[int] = mapped_column(
+        Integer(), default=0, server_default="0", nullable=False
+    )
     last_refresh_status: Mapped[MaterialRefreshStatus] = mapped_column(
         Enum(
             MaterialRefreshStatus,

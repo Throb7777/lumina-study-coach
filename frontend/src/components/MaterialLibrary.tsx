@@ -202,13 +202,19 @@ export function MaterialLibrary({
               <div className="material-row__copy">
                 <div>
                   <strong>{material.title}</strong>
-                  {material.is_primary && <span className="material-primary"><Star size={12} />主材料</span>}
+                  {material.is_primary && <span className="material-primary"><Star size={12} />重点材料</span>}
                 </div>
                 <span>
                   {showCourse ? `${material.course_name} · ` : ''}
                   {scopeLabel(material)} · {material.source_type === 'pdf' ? 'PDF' : material.source_type === 'video' ? '视频字幕' : '网页'} · {material.chunk_count} 个片段
+                  {material.source_type === 'pdf' && (material.total_pages ?? 0) > 0
+                    ? ` · ${material.total_pages} 页${(material.ocr_pages ?? 0) > 0 ? `（OCR ${material.ocr_pages} 页）` : ''}`
+                    : ''}
                 </span>
                 {material.status === 'failed' && <small>{material.error_text}</small>}
+                {material.status === 'ready' && material.warning_text && (
+                  <small className="material-refresh-warning">{material.warning_text}</small>
+                )}
                 {material.status === 'ready' && material.last_refresh_status === 'failed' && (
                   <small className="material-refresh-warning">
                     上次重新解析失败，仍使用已有版本：{material.last_refresh_error}
@@ -242,25 +248,23 @@ export function MaterialLibrary({
                 <button
                   className="icon-button"
                   type="button"
-                  title={material.is_primary ? '取消主材料' : '设为主材料'}
-                  aria-label={material.is_primary ? `取消 ${material.title} 的主材料标记` : `将 ${material.title} 设为主材料`}
-                  disabled={busy}
+                  title={material.is_primary ? '取消重点材料' : '标记为重点材料'}
+                  aria-label={material.is_primary ? `取消 ${material.title} 的重点材料标记` : `将 ${material.title} 标记为重点材料`}
+                  disabled={busy || material.status !== 'ready'}
                   onClick={() => void updateMaterial(material, { is_primary: !material.is_primary })}
                 >
                   <Star size={15} fill={material.is_primary ? 'currentColor' : 'none'} />
                 </button>
-                {(material.status === 'failed' || material.source_type !== 'pdf') && (
-                  <button
-                    className="icon-button"
-                    type="button"
-                    title={material.status === 'failed' ? '重新解析' : '刷新链接内容'}
-                    aria-label={`${material.status === 'failed' ? '重新解析' : '刷新'} ${material.title}`}
-                    disabled={busy}
-                    onClick={() => void refreshMaterial(material)}
-                  >
-                    <RefreshCw size={15} />
-                  </button>
-                )}
+                <button
+                  className="icon-button"
+                  type="button"
+                  title={material.source_type === 'pdf' ? '重新解析 PDF' : material.status === 'failed' ? '重新解析' : '刷新链接内容'}
+                  aria-label={`${material.source_type === 'pdf' || material.status === 'failed' ? '重新解析' : '刷新'} ${material.title}`}
+                  disabled={busy}
+                  onClick={() => void refreshMaterial(material)}
+                >
+                  <RefreshCw size={15} />
+                </button>
                 <button
                   className="icon-button icon-button--danger"
                   type="button"

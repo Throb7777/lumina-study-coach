@@ -78,7 +78,7 @@ from app.materials import (
     MaterialError,
     MaterialReference,
     content_hash,
-    extract_pdf,
+    extract_pdf_detailed,
     fetch_url,
     fetch_video_transcript,
     html_chunks,
@@ -512,6 +512,10 @@ def material_read(material: LearningMaterial) -> MaterialRead:
         original_name=material.original_name,
         status=material.status,
         error_text=material.error_text,
+        warning_text=material.warning_text,
+        total_pages=material.total_pages,
+        ocr_pages=material.ocr_pages,
+        failed_pages=material.failed_pages,
         last_refresh_status=material.last_refresh_status,
         last_refresh_error=material.last_refresh_error,
         last_refresh_at=material.last_refresh_at,
@@ -2225,6 +2229,7 @@ def is_first_material_in_scope(
             LearningMaterial.course_id == course_id,
             LearningMaterial.chapter_id == chapter_id,
             LearningMaterial.section_id == section_id,
+            LearningMaterial.status == MaterialStatus.READY,
         )
     )
     return existing is None
@@ -2304,18 +2309,24 @@ async def create_pdf_material(
     await run_in_threadpool(source_path.write_bytes, content)
     material.storage_path = str(source_path.relative_to(root.resolve()))
     try:
-        chunks = await run_in_threadpool(extract_pdf, source_path)
+        extraction = await run_in_threadpool(extract_pdf_detailed, source_path)
+        chunks = extraction.chunks
         material.content_hash = revision_hash(digest, chunks)
         save_chunks(session, material, chunks)
+        material.warning_text = extraction.warning_text
+        material.total_pages = extraction.total_pages
+        material.ocr_pages = extraction.ocr_pages
+        material.failed_pages = len(extraction.failed_pages)
         material.last_refresh_status = MaterialRefreshStatus.SUCCEEDED
         material.last_success_at = datetime.now()
     except MaterialError as error:
         material.status = MaterialStatus.FAILED
         material.error_text = str(error)
+        material.is_primary = False
         material.last_refresh_status = MaterialRefreshStatus.FAILED
         material.last_refresh_error = str(error)
     material.last_refresh_at = datetime.now()
-    set_primary(session, material)
+    set_primary(session, material, ensure_default=True)
     session.commit()
     return material_read(load_material(session, material.id))
 
@@ -2410,6 +2421,10 @@ def create_url_material(
         source_path.write_bytes(content)
         material.storage_path = str(source_path.relative_to(root.resolve()))
         save_chunks(session, material, chunks)
+        material.warning_text = ""
+        material.total_pages = 0
+        material.ocr_pages = 0
+        material.failed_pages = 0
         material.last_refresh_status = MaterialRefreshStatus.SUCCEEDED
         material.last_success_at = datetime.now()
     except MaterialError as error:
@@ -2419,7 +2434,7 @@ def create_url_material(
         material.last_refresh_error = str(error)
     material.last_refresh_at = datetime.now()
     if material.status == MaterialStatus.READY:
-        set_primary(session, material)
+        set_primary(session, material, ensure_default=True)
     session.commit()
     session.expire_all()
     return material_read(load_material(session, material.id))
@@ -2450,6 +2465,8 @@ def update_material(
     if payload.title is not None:
         material.title = payload.title
     if payload.is_primary is not None:
+        if payload.is_primary and material.status != MaterialStatus.READY:
+            raise HTTPException(status_code=422, detail="解析成功的材料才能标记为重点材料")
         material.is_primary = payload.is_primary
     set_primary(session, material)
     session.commit()
@@ -2477,7 +2494,8 @@ def refresh_material(
                 raise MaterialError("原 PDF 文件不存在，请删除后重新添加")
             content = source_path.read_bytes()
             source_digest = content_hash(content)
-            chunks = extract_pdf(source_path)
+            extraction = extract_pdf_detailed(source_path)
+            chunks = extraction.chunks
             final_url = material.source_url
             page_title = material.original_name
             new_storage_path = material.storage_path
@@ -2509,6 +2527,17 @@ def refresh_material(
         material.parser_version = MATERIAL_PARSER_VERSION
         material.storage_path = new_storage_path
         save_chunks(session, material, chunks)
+        if material.source_type == MaterialSourceType.PDF:
+            material.warning_text = extraction.warning_text
+            material.total_pages = extraction.total_pages
+            material.ocr_pages = extraction.ocr_pages
+            material.failed_pages = len(extraction.failed_pages)
+        else:
+            material.warning_text = ""
+            material.total_pages = 0
+            material.ocr_pages = 0
+            material.failed_pages = 0
+        set_primary(session, material, ensure_default=True)
         material.last_refresh_status = MaterialRefreshStatus.SUCCEEDED
         material.last_refresh_error = ""
         material.last_refresh_at = datetime.now()
