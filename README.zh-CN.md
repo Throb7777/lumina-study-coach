@@ -11,7 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Throb7777/lumina-study-coach/releases/latest"><img alt="最新版本" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach"></a>
+  <a href="https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2"><img alt="最新版本" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach?include_prereleases"></a>
   <a href="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Windows 10 和 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b7894">
@@ -29,9 +29,10 @@ Markdown 文件并交给 Obsidian 管理。
 
 ## 下载
 
-从 [GitHub Releases](https://github.com/Throb7777/lumina-study-coach/releases/latest)
-下载 `install_Lumina-0.1.2.exe`。安装包已经包含 Web 应用、本地服务和
-Python 运行时，普通使用不需要另外安装 Node.js 或 Python。
+从 [Lumina v0.1.2 Release](https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2)
+下载 `install_Lumina-0.1.2.exe`。安装包已经包含 Web 应用、本地服务、
+Python 运行时以及英文和简体中文 OCR，普通使用不需要另外安装 Node.js、
+Python 或 Tesseract。
 
 当前预览版尚未进行代码签名，Windows SmartScreen 可能要求手动确认。
 安装前可以使用 Release 页面提供的 SHA-256 校验文件核对安装包。
@@ -43,7 +44,11 @@ Python 运行时，普通使用不需要另外安装 Node.js 或 Python。
 - 引导完成回顾、主动重构、练习、纠错和下次问题。
 - 一次生成 12 道结构化练习，支持逐题作答与逐题查看批改。
 - 保存错题、学习记忆和可搜索的小节笔记。
-- 导入 PDF、网页，以及受支持的公开视频字幕。
+- 导入原生文本 PDF、扫描 PDF、网页，以及受支持的公开视频字幕。
+- 只对需要识别的 PDF 页面自动使用内置中英文 OCR。
+- 个别 PDF 页面解析失败时保留其他页面的成功结果，并给出明确警告。
+- 同一课程、章节或小节可以标记多个重点材料。
+- 章节和小节材料使用独立弹窗管理，不挤占课程阅读区域。
 - 将最终笔记保存到 Obsidian 的 `课程/章节/小节.md`。
 - 课程、材料、配置和索引均保存在本机。
 - 内置一份只读示例，可直接查看完整学习流程。
@@ -65,7 +70,7 @@ Lumina 不要求填写 OpenAI 或 Gemini API Key。
 1. 安装 Lumina，并从桌面或开始菜单启动。
 2. 在首次欢迎框中点击“开始使用”。
 3. 查看内置示例，或者创建一门课程及第一个小节。
-4. 根据需要添加 PDF 或 URL 材料。
+4. 根据需要添加 PDF 或 URL 材料；扫描 PDF 会自动识别。
 5. 创建学习记录并完成当天流程。
 6. 需要整理小节笔记时，再在设置中选择 Obsidian Vault。
 
@@ -81,7 +86,7 @@ Lumina 只监听 `127.0.0.1`。关闭浏览器不会终止仍在生成的任务�
 - Obsidian 笔记：用户选择的 Vault。
 
 Lumina 不包含统计分析或遥测。只有用户主动发起 URL 下载、外部 CLI 登录、
-AI 任务、OCR 安装或语义模型下载时才会访问网络。完整说明见
+AI 任务或语义模型下载时才会访问网络；内置 OCR 完全在本机运行。完整说明见
 [数据与隐私](docs/DATA_AND_PRIVACY.md)。
 
 默认卸载会保留学习数据。选择同时删除数据时，需要两次确认，并且会先创建最终备份。
