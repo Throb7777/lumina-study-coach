@@ -20,6 +20,8 @@ def app(tmp_path: Path, database_url: str) -> FastAPI:
         static_dir=tmp_path / "missing-dist",
         database_url=database_url,
         material_dir=tmp_path / "materials",
+        answer_attachment_dir=tmp_path / "answer-attachments",
+        runtime_data_dir=tmp_path / "runtime-data",
         first_run_marker=tmp_path / "first-run.pending",
     )
 

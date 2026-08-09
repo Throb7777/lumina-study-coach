@@ -238,7 +238,14 @@ def _bundled_tessdata() -> Path | None:
     return tessdata if all(item.is_file() for item in required) else None
 
 
-def _ocr_pdf_page(path: Path, page_index: int) -> str:
+def _ocr_pdf_page(
+    path: Path,
+    page_index: int,
+    *,
+    deadline: float | None = None,
+    command_timeout_seconds: float = 90,
+    page_segmentation_modes: tuple[int, ...] = (3, 6, 11),
+) -> str:
     executable = _tesseract_executable()
     if not executable:
         raise MaterialError(
@@ -265,7 +272,10 @@ def _ocr_pdf_page(path: Path, page_index: int) -> str:
         if _bundled_ocr_root() is not None and tessdata is None:
             raise MaterialError("内置 OCR 中文或英文语言包缺失，请重新安装或修复 Lumina。")
         best_text = ""
-        for page_segmentation_mode in (3, 6, 11):
+        for page_segmentation_mode in page_segmentation_modes:
+            remaining = None if deadline is None else deadline - time.monotonic()
+            if remaining is not None and remaining <= 0:
+                raise MaterialError("附件 OCR 超时，请减少 PDF 页数或上传更清晰的文件")
             command = [executable, str(image_path), "stdout"]
             if tessdata is not None:
                 command.extend(["--tessdata-dir", str(tessdata)])
@@ -284,7 +294,11 @@ def _ocr_pdf_page(path: Path, page_index: int) -> str:
                     text=True,
                     encoding="utf-8",
                     errors="replace",
-                    timeout=90,
+                    timeout=(
+                        command_timeout_seconds
+                        if remaining is None
+                        else max(0.1, min(command_timeout_seconds, remaining))
+                    ),
                     check=False,
                     creationflags=0x08000000 if os.name == "nt" else 0,
                 )
@@ -301,6 +315,61 @@ def _ocr_pdf_page(path: Path, page_index: int) -> str:
         return best_text
 
 
+def extract_image_text(
+    path: Path,
+    *,
+    timeout_seconds: float = 90,
+    page_segmentation_modes: tuple[int, ...] = (3, 6, 11),
+) -> str:
+    executable = _tesseract_executable()
+    if not executable:
+        raise MaterialError("内置 OCR 运行时缺失或损坏，请重新运行 Lumina 安装程序进行修复。")
+    tessdata = _bundled_tessdata()
+    if _bundled_ocr_root() is not None and tessdata is None:
+        raise MaterialError("内置 OCR 中文或英文语言包缺失，请重新安装或修复 Lumina。")
+    best_text = ""
+    deadline = time.monotonic() + timeout_seconds
+    for page_segmentation_mode in page_segmentation_modes:
+        remaining = deadline - time.monotonic()
+        if remaining <= 0:
+            raise MaterialError("图片 OCR 超时，请上传更清晰或更小的图片")
+        command = [executable, str(path), "stdout"]
+        if tessdata is not None:
+            command.extend(["--tessdata-dir", str(tessdata)])
+        command.extend([
+            "-l",
+            OCR_LANGUAGES,
+            "--oem",
+            "1",
+            "--psm",
+            str(page_segmentation_mode),
+        ])
+        try:
+            completed = subprocess.run(
+                command,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=max(0.1, min(20, remaining)),
+                check=False,
+                creationflags=0x08000000 if os.name == "nt" else 0,
+            )
+        except (OSError, subprocess.TimeoutExpired) as error:
+            raise MaterialError(f"图片 OCR 失败：{error}") from error
+        if completed.returncode != 0:
+            detail = completed.stderr.strip() or "内置 OCR 运行失败"
+            raise MaterialError(f"图片 OCR 失败：{detail}")
+        candidate = completed.stdout.strip()
+        if len(re.sub(r"\s+", "", candidate)) > len(re.sub(r"\s+", "", best_text)):
+            best_text = candidate
+        if len(re.sub(r"\s+", "", best_text)) >= MIN_NATIVE_PAGE_CHARACTERS:
+            break
+    if not best_text:
+        raise MaterialError("图片中未识别到可用于批改的文字，请换一张更清晰的图片")
+    return best_text
+
+
 def _ocr_cache_path(path: Path, source_digest: str, page_number: int) -> Path:
     material_root = path.parent.parent if path.parent.name == "versions" else path.parent
     key = hashlib.sha256(
@@ -309,7 +378,15 @@ def _ocr_cache_path(path: Path, source_digest: str, page_number: int) -> Path:
     return material_root / "ocr-cache" / f"{key}.txt"
 
 
-def extract_pdf_detailed(path: Path) -> PdfExtraction:
+def extract_pdf_detailed(
+    path: Path,
+    *,
+    max_pages: int | None = None,
+    use_ocr_cache: bool = True,
+    ocr_timeout_seconds: float | None = None,
+    ocr_command_timeout_seconds: float = 90,
+    ocr_page_segmentation_modes: tuple[int, ...] = (3, 6, 11),
+) -> PdfExtraction:
     try:
         reader = PdfReader(path)
     except Exception as error:
@@ -325,7 +402,14 @@ def extract_pdf_detailed(path: Path) -> PdfExtraction:
         total_pages = len(reader.pages)
     except Exception as error:
         raise MaterialError(f"无法读取 PDF 页面：{error}") from error
+    if max_pages is not None and total_pages > max_pages:
+        raise MaterialError(f"作答 PDF 最多支持 {max_pages} 页")
     source_digest = content_hash(path.read_bytes())
+    ocr_deadline = (
+        None
+        if ocr_timeout_seconds is None
+        else time.monotonic() + ocr_timeout_seconds
+    )
     chunks: list[tuple[str, int | None, str]] = []
     failed_pages: list[int] = []
     page_errors: list[str] = []
@@ -337,12 +421,26 @@ def extract_pdf_detailed(path: Path) -> PdfExtraction:
             if _page_needs_ocr(page, text):
                 ocr_pages += 1
                 cache_path = _ocr_cache_path(path, source_digest, page_number)
-                if cache_path.is_file():
+                if use_ocr_cache and cache_path.is_file():
                     text = cache_path.read_text(encoding="utf-8")
                 else:
-                    text = _ocr_pdf_page(path, page_number - 1)
-                    cache_path.parent.mkdir(parents=True, exist_ok=True)
-                    cache_path.write_text(text, encoding="utf-8")
+                    if (
+                        ocr_deadline is None
+                        and ocr_command_timeout_seconds == 90
+                        and ocr_page_segmentation_modes == (3, 6, 11)
+                    ):
+                        text = _ocr_pdf_page(path, page_number - 1)
+                    else:
+                        text = _ocr_pdf_page(
+                            path,
+                            page_number - 1,
+                            deadline=ocr_deadline,
+                            command_timeout_seconds=ocr_command_timeout_seconds,
+                            page_segmentation_modes=ocr_page_segmentation_modes,
+                        )
+                    if use_ocr_cache:
+                        cache_path.parent.mkdir(parents=True, exist_ok=True)
+                        cache_path.write_text(text, encoding="utf-8")
         except Exception as error:
             failed_pages.append(page_number)
             page_errors.append(str(error))

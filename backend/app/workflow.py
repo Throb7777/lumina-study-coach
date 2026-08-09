@@ -24,7 +24,7 @@ WORKFLOW_NODES: tuple[tuple[WorkflowNodeKey, str], ...] = (
 
 WORKFLOW_NODE_TITLES = {
     **dict(WORKFLOW_NODES),
-    WorkflowNodeKey.PREVIEW_QUESTIONS: "预习问题",
+    WorkflowNodeKey.PREVIEW_QUESTIONS: "下次回顾问题",
     WorkflowNodeKey.SECTION_NOTE: "小节笔记",
     WorkflowNodeKey.DAILY_COMPLETE: "完成今日学习",
 }

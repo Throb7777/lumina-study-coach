@@ -4,7 +4,25 @@ const listDisplayStart = /^(\s*)((?:[-+*]|\d+[.)]))\s+\\\[\s*$/
 const inlineDisplayMath = /\\\[([^\n]+?)\\\]/g
 const htmlBreak = /<br\s*\/?>/gi
 
+function controlPattern(code: number, suffix: string) {
+  return new RegExp(`${String.fromCharCode(code)}${suffix}`, 'g')
+}
+
+const brokenLatexEscapes: Array<[RegExp, string]> = [
+  [controlPattern(7, String.raw`omega\b`), String.raw`\omega`],
+  [controlPattern(7, String.raw`(?=(?:cdots|dots)\b)`), '\\'],
+  [controlPattern(7, String.raw`(?=(?:lpha|ngle|pprox|st)\b)`), String.raw`\a`],
+  [controlPattern(8, String.raw`(?=(?:egin|inom|eta)\b)`), String.raw`\b`],
+  [controlPattern(12, String.raw`(?=rac\b)`), String.raw`\f`],
+  [controlPattern(11, String.raw`(?=(?:dots|ec)\b)`), String.raw`\v`],
+  [/\t(?=(?:imes|ext|heta)(?![A-Za-z]))/g, String.raw`\t`],
+  [/\r(?=(?:ight|ho)\b)/g, String.raw`\r`],
+]
+
 export function normalizeMarkdownMath(content: string) {
+  for (const [pattern, replacement] of brokenLatexEscapes) {
+    content = content.replace(pattern, replacement)
+  }
   const outerMatch = content.match(outerMarkdownFence)
   const source = outerMatch ? outerMatch[1] : content
   let activeFence: string | null = null

@@ -10,6 +10,7 @@ from pydantic import BaseModel
 from sqlalchemy import update
 
 from app.ai_providers import AiService
+from app.api import cleanup_backup_runtime
 from app.api import router as api_router
 from app.config import settings
 from app.database import create_database_engine, create_session_factory
@@ -40,12 +41,18 @@ def create_app(
     static_dir: Path | None = None,
     database_url: str | None = None,
     material_dir: Path | None = None,
+    answer_attachment_dir: Path | None = None,
+    runtime_data_dir: Path | None = None,
     today_provider: Callable[[], date] | None = None,
     shutdown_callback: Callable[[], None] | None = None,
     first_run_marker: Path | None = None,
 ) -> FastAPI:
     resolved_database_url = database_url or settings.database_url
     resolved_material_dir = (material_dir or settings.material_dir).resolve()
+    resolved_answer_attachment_dir = (
+        answer_attachment_dir or settings.answer_attachment_dir
+    ).resolve()
+    resolved_runtime_data_dir = (runtime_data_dir or settings.runtime_data_dir).resolve()
 
     @asynccontextmanager
     async def lifespan(application: FastAPI):
@@ -65,6 +72,9 @@ def create_app(
         application.state.ai_service = AiService(settings.codex_home, settings.ai_workspace)
         application.state.background_tasks = set()
         application.state.material_dir = resolved_material_dir
+        application.state.answer_attachment_dir = resolved_answer_attachment_dir
+        application.state.runtime_data_dir = resolved_runtime_data_dir
+        cleanup_backup_runtime(resolved_runtime_data_dir)
         try:
             yield
         finally:

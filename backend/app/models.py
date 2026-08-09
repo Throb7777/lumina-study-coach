@@ -40,13 +40,20 @@ class AiInteractionKind(StrEnum):
     RECONSTRUCTION_REVIEW = "reconstruction_review"
 
 
+class GuidedReflectionKind(StrEnum):
+    RECALL = "recall"
+    RECONSTRUCT = "reconstruct"
+
+
 class AiProvider(StrEnum):
     CODEX = "codex"
     GEMINI = "gemini"
 
 
 class AiRunTask(StrEnum):
+    RECALL_QUESTIONS = "recall_questions"
     RECALL_REVIEW = "recall_review"
+    RECONSTRUCTION_QUESTIONS = "reconstruction_questions"
     RECONSTRUCTION_REVIEW = "reconstruction_review"
     PRACTICE_GENERATION = "practice_generation"
     EXERCISE_GRADING = "exercise_grading"
@@ -312,6 +319,11 @@ class DailyRecord(TimestampMixin, Base):
         cascade="all, delete-orphan",
         order_by="AiInteraction.id",
     )
+    guided_reflections: Mapped[list["GuidedReflection"]] = relationship(
+        back_populates="daily_record",
+        cascade="all, delete-orphan",
+        order_by="GuidedReflection.id",
+    )
     exercises: Mapped[list["Exercise"]] = relationship(
         back_populates="daily_record",
         cascade="all, delete-orphan",
@@ -546,6 +558,74 @@ class AiInteraction(TimestampMixin, Base):
     daily_record: Mapped[DailyRecord] = relationship(back_populates="ai_interactions")
 
 
+class GuidedReflection(TimestampMixin, Base):
+    __tablename__ = "guided_reflections"
+    __table_args__ = (UniqueConstraint("daily_record_id", "kind"),)
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    daily_record_id: Mapped[int] = mapped_column(
+        ForeignKey("daily_records.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    kind: Mapped[GuidedReflectionKind] = mapped_column(
+        Enum(
+            GuidedReflectionKind,
+            values_callable=enum_values,
+            native_enum=False,
+            create_constraint=True,
+            name="guided_reflection_kind",
+        ),
+        nullable=False,
+    )
+    questions_json: Mapped[str] = mapped_column(
+        Text(), default="[]", server_default="[]", nullable=False
+    )
+    answers_json: Mapped[str] = mapped_column(
+        Text(), default="{}", server_default="{}", nullable=False
+    )
+    reviews_json: Mapped[str] = mapped_column(
+        Text(), default="[]", server_default="[]", nullable=False
+    )
+    question_prompt_text: Mapped[str] = mapped_column(
+        Text(), default="", server_default="", nullable=False
+    )
+    review_prompt_text: Mapped[str] = mapped_column(
+        Text(), default="", server_default="", nullable=False
+    )
+    feedback_text: Mapped[str] = mapped_column(
+        Text(), default="", server_default="", nullable=False
+    )
+
+    daily_record: Mapped[DailyRecord] = relationship(back_populates="guided_reflections")
+
+    @property
+    def questions(self) -> list[dict[str, str]]:
+        try:
+            value = json.loads(self.questions_json)
+        except json.JSONDecodeError:
+            return []
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+    @property
+    def answers(self) -> dict[str, str]:
+        try:
+            value = json.loads(self.answers_json)
+        except json.JSONDecodeError:
+            return {}
+        return (
+            {str(key): str(answer) for key, answer in value.items()}
+            if isinstance(value, dict)
+            else {}
+        )
+
+    @property
+    def reviews(self) -> list[dict[str, str]]:
+        try:
+            value = json.loads(self.reviews_json)
+        except json.JSONDecodeError:
+            return []
+        return [item for item in value if isinstance(item, dict)] if isinstance(value, list) else []
+
+
 class Exercise(TimestampMixin, Base):
     __tablename__ = "exercises"
 
@@ -655,6 +735,35 @@ class ExerciseItem(TimestampMixin, Base):
             return {}
         return value if isinstance(value, dict) else {}
 
+    @property
+    def reference_answer_markdown(self) -> str:
+        if self.exercise.status != "graded":
+            return ""
+        selected_options = self.answer_key.get("selected_options")
+        selected_ids = (
+            [str(option_id) for option_id in selected_options]
+            if isinstance(selected_options, list)
+            else []
+        )
+        option_labels = {
+            str(option.get("id")): str(option.get("label", "")).strip()
+            for option in self.options
+            if isinstance(option, dict) and option.get("id") is not None
+        }
+        selected_answer = "、".join(
+            f"{option_id}. {option_labels[option_id]}"
+            if option_labels.get(option_id)
+            else option_id
+            for option_id in selected_ids
+        )
+        answer_markdown = str(self.answer_key.get("answer_markdown", "")).strip()
+        parts = []
+        if selected_answer:
+            parts.append(f"正确选项：{selected_answer}")
+        if answer_markdown:
+            parts.append(answer_markdown)
+        return "\n\n".join(parts)
+
 
 class ExerciseResponse(TimestampMixin, Base):
     __tablename__ = "exercise_responses"
@@ -690,6 +799,11 @@ class ExerciseResponse(TimestampMixin, Base):
     score: Mapped[int | None] = mapped_column(Integer())
 
     exercise_item: Mapped[ExerciseItem] = relationship(back_populates="response")
+    attachments: Mapped[list["ExerciseResponseAttachment"]] = relationship(
+        back_populates="exercise_response",
+        cascade="all, delete-orphan",
+        order_by="ExerciseResponseAttachment.id",
+    )
 
     @property
     def selected_options(self) -> list[str]:
@@ -698,6 +812,28 @@ class ExerciseResponse(TimestampMixin, Base):
         except json.JSONDecodeError:
             return []
         return [str(item) for item in value] if isinstance(value, list) else []
+
+
+class ExerciseResponseAttachment(TimestampMixin, Base):
+    __tablename__ = "exercise_response_attachments"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    exercise_response_id: Mapped[int] = mapped_column(
+        ForeignKey("exercise_responses.id", ondelete="CASCADE"), index=True, nullable=False
+    )
+    original_name: Mapped[str] = mapped_column(String(300), nullable=False)
+    media_type: Mapped[str] = mapped_column(String(100), nullable=False)
+    size_bytes: Mapped[int] = mapped_column(Integer(), nullable=False)
+    sha256: Mapped[str] = mapped_column(String(64), nullable=False)
+    storage_path: Mapped[str] = mapped_column(String(1000), nullable=False)
+    extracted_text: Mapped[str] = mapped_column(
+        Text(), default="", server_default="", nullable=False
+    )
+    processing_status: Mapped[str] = mapped_column(
+        String(30), default="ready", server_default="ready", nullable=False
+    )
+
+    exercise_response: Mapped[ExerciseResponse] = relationship(back_populates="attachments")
 
 
 class Mistake(TimestampMixin, Base):

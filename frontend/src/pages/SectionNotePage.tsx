@@ -308,8 +308,10 @@ export function SectionNotePage() {
           <div><p className="eyebrow">{record?.section_title ?? '小节笔记'}</p><h1>{note?.file_name ?? '小节笔记'}</h1><p>{note?.relative_path ?? '尚未配置 Obsidian 路径'}</p></div>
           <div className="note-toolbar__actions">
             <span className={content === note?.content ? 'save-state' : 'save-state save-state--dirty'}>{content === note?.content ? '已保存' : '未保存'}</span>
-            <button className="secondary-button" type="button" disabled={busy || !note} onClick={() => persistNote(false)}><Save size={15} />保存到 Obsidian</button>
-            {record && <button className="primary-button" type="button" disabled={busy || !note} onClick={(event) => requestNoteCompletion(event.currentTarget)}><Check size={15} />保存并完成小节</button>}
+            <div className="note-toolbar__button-group">
+              <button className="secondary-button" type="button" disabled={busy || !note} onClick={() => persistNote(false)}><Save size={15} />保存到 Obsidian</button>
+              {record && <button className="primary-button" type="button" disabled={busy || !note} onClick={(event) => requestNoteCompletion(event.currentTarget)}><Check size={15} />保存并完成小节</button>}
+            </div>
           </div>
         </header>
         <DraftStatus
@@ -453,11 +455,6 @@ export function SectionNotePage() {
         )}
       >
         <div className="generated-note-preview">
-          {pendingDraft && pendingDraft.material_revision > 0 && (
-            <p className="generated-note-preview__meta">
-              基于本小节材料版本 {pendingDraft.material_revision}
-            </p>
-          )}
           <MarkdownContent content={pendingDraft?.text ?? ''} />
         </div>
       </AppDialog>

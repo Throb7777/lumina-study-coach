@@ -1,9 +1,12 @@
 import asyncio
+import hashlib
 import json
+import time
 from contextlib import suppress
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
 from typing import Annotated
+from uuid import uuid4
 
 from fastapi import (
     APIRouter,
@@ -19,11 +22,15 @@ from fastapi import (
 )
 from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session, joinedload, selectinload
+from starlette.background import BackgroundTask
 from starlette.concurrency import run_in_threadpool
+from starlette.responses import FileResponse
 
 from app.ai_output_validation import (
     AiOutputValidationError,
     grading_output_validator,
+    guided_review_output_validator,
+    validate_guided_questions_output,
     validate_practice_output,
     validate_preview_output,
 )
@@ -45,6 +52,8 @@ from app.ai_providers import (
 from app.ai_workflows import (
     DAILY_SUMMARY_OUTPUT_SCHEMA,
     GRADING_OUTPUT_SCHEMA,
+    GUIDED_QUESTIONS_OUTPUT_SCHEMA,
+    GUIDED_REVIEW_OUTPUT_SCHEMA,
     PRACTICE_OUTPUT_SCHEMA,
     PREVIEW_OUTPUT_SCHEMA,
     TEXT_OUTPUT_SCHEMA,
@@ -58,9 +67,28 @@ from app.ai_workflows import (
     ensure_section_memory,
     load_course_with_memories,
     parse_structured_output,
+    previous_learning_record,
     refresh_section_memory,
     run_codex,
     run_gemini,
+)
+from app.answer_attachments import (
+    MAX_ANSWER_ATTACHMENT_BYTES,
+    MAX_ANSWER_ATTACHMENT_TEXT_CHARS,
+    MAX_ANSWER_ATTACHMENTS,
+    MAX_ANSWER_RESPONSE_TEXT_CHARS,
+    AnswerAttachmentError,
+    detected_media_type,
+    extract_attachment_text,
+    remove_attachment_files,
+    safe_original_name,
+    validate_image_dimensions,
+)
+from app.data_archive import (
+    ArchiveError,
+    create_backup_archive,
+    inspect_backup_archive,
+    managed_note_files,
 )
 from app.database import get_session
 from app.exports import build_markdown_archive
@@ -110,7 +138,10 @@ from app.models import (
     ExerciseItem,
     ExerciseItemType,
     ExerciseResponse,
+    ExerciseResponseAttachment,
     ExerciseResponseStatus,
+    GuidedReflection,
+    GuidedReflectionKind,
     LearningMaterial,
     MaterialContextSession,
     MaterialRefreshStatus,
@@ -139,9 +170,12 @@ from app.prompts import (
     daily_summary_prompt,
     deterministic_choice_verdict,
     grading_prompt,
+    guided_reflection_review_prompt,
     practice_generation_prompt,
     preview_questions_prompt,
+    recall_questions_prompt,
     recall_review_prompt,
+    reconstruction_questions_prompt,
     reconstruction_review_prompt,
     section_note_prompt,
 )
@@ -159,6 +193,9 @@ from app.schemas import (
     AiRunRead,
     AiRunResultRead,
     AiSourceReferenceRead,
+    BackupInspectRead,
+    BackupRestoreRead,
+    BackupRestoreRequest,
     ChapterCreate,
     ChapterMemoryRead,
     ChapterRead,
@@ -181,6 +218,8 @@ from app.schemas import (
     ExerciseResponseUpdate,
     ExerciseUpdate,
     GeminiProviderLoginRead,
+    GuidedReflectionAnswersUpdate,
+    GuidedReflectionRead,
     LearnerProfileUpdate,
     LocalSettingsRead,
     MarkdownArchiveRequest,
@@ -288,10 +327,10 @@ async def grounded_task_context(
     task: AiRunTask,
 ) -> tuple[str, list[MaterialReference], MaterialContextSession | None]:
     material_record = record
-    if task == AiRunTask.RECALL_REVIEW:
-        previous_records = load_previous_records(session, record)
-        if previous_records:
-            material_record = previous_records[0]
+    if task in {AiRunTask.RECALL_QUESTIONS, AiRunTask.RECALL_REVIEW}:
+        previous = previous_learning_record(session, record)
+        if previous is not None:
+            material_record = previous
     material_context = await ensure_material_context(session, ai_service, material_record)
     material_pending = bool(
         material_context is not None and material_context.change_kind.endswith("_pending")
@@ -360,6 +399,7 @@ def load_daily_record(session: Session, record_id: int) -> DailyRecord:
         .options(
             selectinload(DailyRecord.workflow_nodes),
             selectinload(DailyRecord.ai_interactions),
+            selectinload(DailyRecord.guided_reflections),
             selectinload(DailyRecord.exercises).selectinload(Exercise.mistakes),
             selectinload(DailyRecord.exercises)
             .selectinload(Exercise.items)
@@ -401,29 +441,80 @@ def load_all_section_records(session: Session, record: DailyRecord) -> list[Dail
     )
 
 
+def practice_excluded_questions(session: Session, record: DailyRecord) -> list[str]:
+    records = list(
+        session.scalars(
+            select(DailyRecord)
+            .where(DailyRecord.section_id == record.section_id)
+            .options(
+                selectinload(DailyRecord.exercises).selectinload(Exercise.items)
+            )
+            .order_by(DailyRecord.study_date.desc(), DailyRecord.id.desc())
+        )
+    )
+    questions: list[str] = []
+    for saved_record in records:
+        for exercise in reversed(saved_record.exercises):
+            if exercise.items:
+                questions.extend(
+                    item.stem_markdown.strip()
+                    for item in exercise.items
+                    if item.stem_markdown.strip()
+                )
+            elif exercise.ai_questions.strip():
+                questions.append(exercise.ai_questions.strip()[:3000])
+            if len(questions) >= 80:
+                return questions[:80]
+    return questions
+
+
 def load_previous_preview_questions(
     session: Session, record: DailyRecord
 ) -> PreviousPreviewQuestions | None:
-    previous = session.scalar(
-        select(DailyRecord)
-        .join(PreviewQuestionSet)
-        .where(
-            DailyRecord.section_id == record.section_id,
-            DailyRecord.study_date < record.study_date,
-            PreviewQuestionSet.question_1 != "",
-            PreviewQuestionSet.question_2 != "",
-            PreviewQuestionSet.question_3 != "",
-        )
-        .options(joinedload(DailyRecord.preview_question_set))
-        .order_by(DailyRecord.study_date.desc(), DailyRecord.id.desc())
-        .limit(1)
-    )
-    if previous is None or previous.preview_question_set is None:
+    previous = previous_learning_record(session, record)
+    if previous is None:
         return None
     question_set = previous.preview_question_set
+    questions = (
+        [question_set.question_1, question_set.question_2, question_set.question_3]
+        if question_set is not None
+        else []
+    )
     return PreviousPreviewQuestions(
+        daily_record_id=previous.id,
+        section_id=previous.section_id,
+        section_title=previous.section.title,
         study_date=previous.study_date,
-        questions=[question_set.question_1, question_set.question_2, question_set.question_3],
+        questions=[normalize_ai_markdown(value) for value in questions if value.strip()],
+    )
+
+
+def ensure_carried_recall_questions(session: Session, record: DailyRecord) -> None:
+    if any(item.kind == GuidedReflectionKind.RECALL for item in record.guided_reflections):
+        return
+    source = previous_learning_record(session, record)
+    question_set = source.preview_question_set if source is not None else None
+    if question_set is None:
+        return
+    values = [question_set.question_1, question_set.question_2, question_set.question_3]
+    if len(values) != 3 or any(not value.strip() for value in values):
+        return
+    questions = [
+        {
+            "id": f"q{index}",
+            "question_markdown": normalize_ai_markdown(value),
+            "focus": "上次学习留下的回顾问题",
+        }
+        for index, value in enumerate(values, start=1)
+    ]
+    record.guided_reflections.append(
+        GuidedReflection(
+            kind=GuidedReflectionKind.RECALL,
+            questions_json=json.dumps(questions, ensure_ascii=False),
+            question_prompt_text=(
+                f"沿用 {source.study_date} · {source.section.title} 留下的 3 个回顾问题"
+            ),
+        )
     )
 
 
@@ -481,6 +572,9 @@ def daily_record_response(session: Session, record: DailyRecord) -> DailyRecordR
         workflow_nodes=[WorkflowNodeRead.model_validate(node) for node in record.workflow_nodes],
         previous_records=[DailyRecordSummary.model_validate(item) for item in previous_records],
         ai_interactions=[AiInteractionRead.model_validate(item) for item in record.ai_interactions],
+        guided_reflections=[
+            GuidedReflectionRead.model_validate(item) for item in record.guided_reflections
+        ],
         exercises=[ExerciseRead.model_validate(item) for item in record.exercises],
         preview_question_set=(
             PreviewQuestionSetRead.model_validate(record.preview_question_set)
@@ -571,6 +665,38 @@ def remove_material_files(request: Request, material_ids: list[int]) -> None:
     for material_id in material_ids:
         with suppress(OSError, MaterialError):
             remove_storage(material_root(request), material_id)
+
+
+def attachment_paths_for_scope(
+    session: Session,
+    *,
+    course_id: int | None = None,
+    chapter_id: int | None = None,
+    section_id: int | None = None,
+    exercise_id: int | None = None,
+) -> list[str]:
+    statement = (
+        select(ExerciseResponseAttachment.storage_path)
+        .join(ExerciseResponseAttachment.exercise_response)
+        .join(ExerciseResponse.exercise_item)
+        .join(ExerciseItem.exercise)
+        .join(Exercise.daily_record)
+        .join(DailyRecord.section)
+        .join(Section.chapter)
+    )
+    if course_id is not None:
+        statement = statement.where(Chapter.course_id == course_id)
+    if chapter_id is not None:
+        statement = statement.where(Section.chapter_id == chapter_id)
+    if section_id is not None:
+        statement = statement.where(DailyRecord.section_id == section_id)
+    if exercise_id is not None:
+        statement = statement.where(Exercise.id == exercise_id)
+    return list(session.scalars(statement))
+
+
+def remove_answer_attachment_files(request: Request, storage_paths: list[str]) -> None:
+    remove_attachment_files(request.app.state.answer_attachment_dir, storage_paths)
 
 
 def ai_http_error(error: AiProviderError) -> HTTPException:
@@ -837,6 +963,187 @@ def cancel_ai_run(run_id: int, session: SessionDependency) -> Response:
 
 
 @router.post(
+    "/daily-records/{record_id}/guided-reflections/{kind}/questions",
+    response_model=GuidedReflectionRead,
+)
+async def generate_guided_reflection_questions(
+    record_id: int,
+    kind: GuidedReflectionKind,
+    session: SessionDependency,
+    ai_service: AiServiceDependency,
+) -> GuidedReflection:
+    record = load_daily_record(session, record_id)
+    seed = (
+        record.recall_last_learned
+        if kind == GuidedReflectionKind.RECALL
+        else record.reconstruct_main_learning
+    )
+    if not seed.strip():
+        label = "自由回忆" if kind == GuidedReflectionKind.RECALL else "自由重构"
+        raise HTTPException(status_code=422, detail=f"请先填写并保存{label}")
+    task = (
+        AiRunTask.RECALL_QUESTIONS
+        if kind == GuidedReflectionKind.RECALL
+        else AiRunTask.RECONSTRUCTION_QUESTIONS
+    )
+    source_record = (
+        previous_learning_record(session, record)
+        if kind == GuidedReflectionKind.RECALL
+        else None
+    )
+    memory_context, source_refs, material_context = await grounded_task_context(
+        session, ai_service, record, task
+    )
+    task_prompt = (
+        recall_questions_prompt(record, source_record)
+        if kind == GuidedReflectionKind.RECALL
+        else reconstruction_questions_prompt(record)
+    )
+    prompt = f"{memory_context}\n\n{task_prompt}"
+    try:
+        result = await run_codex(
+            session,
+            ai_service,
+            task=task,
+            prompt=prompt,
+            context_snapshot=memory_context,
+            course_id=record.section.chapter.course_id,
+            section_id=record.section_id,
+            daily_record_id=record.id,
+            output_schema=GUIDED_QUESTIONS_OUTPUT_SCHEMA,
+            source_refs=source_refs,
+            material_context_session=material_context,
+            payload_validator=validate_guided_questions_output,
+        )
+    except AiProviderError as error:
+        raise ai_http_error(error) from error
+    payload = result.payload or parse_structured_output(result.text)
+    questions = [
+        {
+            "id": str(item["id"]),
+            "question_markdown": normalize_ai_markdown(str(item["question_markdown"])),
+            "focus": str(item["focus"]).strip(),
+        }
+        for item in payload["questions"]
+    ]
+    reflection = session.scalar(
+        select(GuidedReflection).where(
+            GuidedReflection.daily_record_id == record.id,
+            GuidedReflection.kind == kind,
+        )
+    )
+    if reflection is None:
+        reflection = GuidedReflection(daily_record=record, kind=kind)
+        session.add(reflection)
+    reflection.questions_json = json.dumps(questions, ensure_ascii=False)
+    reflection.answers_json = "{}"
+    reflection.reviews_json = "[]"
+    reflection.question_prompt_text = prompt
+    reflection.review_prompt_text = ""
+    reflection.feedback_text = ""
+    session.commit()
+    session.refresh(reflection)
+    return reflection
+
+
+@router.put(
+    "/guided-reflections/{reflection_id}/answers",
+    response_model=GuidedReflectionRead,
+)
+def update_guided_reflection_answers(
+    reflection_id: int,
+    payload: GuidedReflectionAnswersUpdate,
+    session: SessionDependency,
+) -> GuidedReflection:
+    reflection = session.get(GuidedReflection, reflection_id)
+    if reflection is None:
+        raise HTTPException(status_code=404, detail="定向回顾记录不存在")
+    question_ids = {str(question.get("id", "")) for question in reflection.questions}
+    if not set(payload.answers).issubset(question_ids):
+        raise HTTPException(status_code=422, detail="回答中包含无效的问题编号")
+    reflection.answers_json = json.dumps(payload.answers, ensure_ascii=False)
+    reflection.reviews_json = "[]"
+    reflection.feedback_text = ""
+    reflection.review_prompt_text = ""
+    session.commit()
+    session.refresh(reflection)
+    return reflection
+
+
+@router.post(
+    "/guided-reflections/{reflection_id}/review",
+    response_model=GuidedReflectionRead,
+)
+async def review_guided_reflection(
+    reflection_id: int,
+    session: SessionDependency,
+    ai_service: AiServiceDependency,
+) -> GuidedReflection:
+    reflection = session.get(GuidedReflection, reflection_id)
+    if reflection is None:
+        raise HTTPException(status_code=404, detail="定向回顾记录不存在")
+    question_ids = [str(question.get("id", "")) for question in reflection.questions]
+    if len(question_ids) != 3 or any(
+        not reflection.answers.get(question_id, "").strip() for question_id in question_ids
+    ):
+        raise HTTPException(status_code=422, detail="请先完整回答 3 个定向问题")
+    record = load_daily_record(session, reflection.daily_record_id)
+    task = (
+        AiRunTask.RECALL_REVIEW
+        if reflection.kind == GuidedReflectionKind.RECALL
+        else AiRunTask.RECONSTRUCTION_REVIEW
+    )
+    source_record = (
+        previous_learning_record(session, record)
+        if reflection.kind == GuidedReflectionKind.RECALL
+        else None
+    )
+    memory_context, source_refs, material_context = await grounded_task_context(
+        session, ai_service, record, task
+    )
+    task_prompt = guided_reflection_review_prompt(record, reflection, source_record)
+    prompt = f"{memory_context}\n\n{task_prompt}"
+    try:
+        result = await run_codex(
+            session,
+            ai_service,
+            task=task,
+            prompt=prompt,
+            context_snapshot=memory_context,
+            course_id=record.section.chapter.course_id,
+            section_id=record.section_id,
+            daily_record_id=record.id,
+            output_schema=GUIDED_REVIEW_OUTPUT_SCHEMA,
+            source_refs=source_refs,
+            material_context_session=material_context,
+            payload_validator=guided_review_output_validator(question_ids),
+        )
+    except AiProviderError as error:
+        raise ai_http_error(error) from error
+    review_payload = result.payload or parse_structured_output(result.text)
+    reflection.review_prompt_text = prompt
+    reflection.reviews_json = json.dumps(
+        [
+            {
+                "id": str(item["id"]),
+                "verdict": str(item["verdict"]),
+                "feedback_markdown": normalize_ai_markdown(
+                    str(item["feedback_markdown"])
+                ),
+            }
+            for item in review_payload["reviews"]
+        ],
+        ensure_ascii=False,
+    )
+    reflection.feedback_text = normalize_ai_markdown(
+        str(review_payload["display_markdown"])
+    )
+    session.commit()
+    session.refresh(reflection)
+    return reflection
+
+
+@router.post(
     "/daily-records/{record_id}/ai-review/{kind}",
     response_model=AiInteractionRead,
     status_code=status.HTTP_201_CREATED,
@@ -901,9 +1208,10 @@ async def generate_ai_practice(
     memory_context, source_refs, material_context = await grounded_task_context(
         session, ai_service, record, AiRunTask.PRACTICE_GENERATION
     )
+    excluded_questions = practice_excluded_questions(session, record)
     prompt = (
         f"{memory_context}\n\n"
-        f"{practice_generation_prompt(record, load_previous_records(session, record))}"
+        f"{practice_generation_prompt(record, excluded_questions)}"
     )
     try:
         result = await run_codex(
@@ -918,7 +1226,9 @@ async def generate_ai_practice(
             output_schema=PRACTICE_OUTPUT_SCHEMA,
             source_refs=source_refs,
             material_context_session=material_context,
-            payload_validator=validate_practice_output,
+            payload_validator=lambda payload: validate_practice_output(
+                payload, excluded_questions
+            ),
         )
     except AiProviderError as error:
         raise ai_http_error(error) from error
@@ -981,11 +1291,7 @@ async def generate_ai_grading(
         unanswered = [
             item.position
             for item in exercise.items
-            if item.response is None
-            or not (
-                item.response.answer_markdown.strip()
-                or json.loads(item.response.selected_options_json or "[]")
-            )
+            if not response_has_content(item.response)
         ]
         if unanswered:
             raise HTTPException(
@@ -1085,7 +1391,10 @@ async def generate_ai_preview_questions(
             material_context_session=material_context,
             payload_validator=validate_preview_output,
         )
-        questions = (result.payload or parse_structured_output(result.text))["questions"]
+        questions = [
+            normalize_ai_markdown(str(question))
+            for question in (result.payload or parse_structured_output(result.text))["questions"]
+        ]
     except AiProviderError as error:
         raise ai_http_error(error) from error
     question_set = record.preview_question_set
@@ -1595,9 +1904,11 @@ def delete_course(
     material_ids = list(
         session.scalars(select(LearningMaterial.id).where(LearningMaterial.course_id == course_id))
     )
+    attachment_paths = attachment_paths_for_scope(session, course_id=course_id)
     session.delete(require_course(session, course_id))
     session.commit()
     remove_material_files(request, material_ids)
+    remove_answer_attachment_files(request, attachment_paths)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1644,9 +1955,11 @@ def delete_chapter(
             select(LearningMaterial.id).where(LearningMaterial.chapter_id == chapter_id)
         )
     )
+    attachment_paths = attachment_paths_for_scope(session, chapter_id=chapter_id)
     session.delete(chapter)
     session.commit()
     remove_material_files(request, material_ids)
+    remove_answer_attachment_files(request, attachment_paths)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1697,9 +2010,11 @@ def delete_section(
             select(LearningMaterial.id).where(LearningMaterial.section_id == section_id)
         )
     )
+    attachment_paths = attachment_paths_for_scope(session, section_id=section_id)
     session.delete(section)
     session.commit()
     remove_material_files(request, material_ids)
+    remove_answer_attachment_files(request, attachment_paths)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
 
 
@@ -1751,7 +2066,8 @@ def open_today_record(
             section.status = SectionStatus.IN_PROGRESS
         session.commit()
 
-    if session.dirty:
+    ensure_carried_recall_questions(session, record)
+    if session.dirty or session.new:
         session.commit()
 
     return daily_record_response(session, load_daily_record(session, record.id))
@@ -1888,7 +2204,9 @@ def update_ai_interaction(
 )
 def create_exercise(record_id: int, session: SessionDependency) -> Exercise:
     record = load_daily_record(session, record_id)
-    task_prompt = practice_generation_prompt(record, load_previous_records(session, record))
+    task_prompt = practice_generation_prompt(
+        record, practice_excluded_questions(session, record)
+    )
     exercise = Exercise(
         daily_record=record,
         generation_prompt=(
@@ -1917,15 +2235,59 @@ def update_exercise(
 
 
 @router.delete("/exercises/{exercise_id}", status_code=status.HTTP_204_NO_CONTENT)
-def delete_legacy_exercise(exercise_id: int, session: SessionDependency) -> Response:
+def delete_legacy_exercise(
+    exercise_id: int,
+    session: SessionDependency,
+    request: Request,
+) -> Response:
     exercise = session.get(Exercise, exercise_id)
     if exercise is None:
         raise HTTPException(status_code=404, detail="练习不存在")
     if exercise.format_version >= 2:
         raise HTTPException(status_code=409, detail="当前只支持删除旧版练习")
+    attachment_paths = attachment_paths_for_scope(session, exercise_id=exercise_id)
     session.delete(exercise)
     session.commit()
+    remove_answer_attachment_files(request, attachment_paths)
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+def response_has_content(response: ExerciseResponse | None) -> bool:
+    return bool(
+        response
+        and (
+            response.answer_markdown.strip()
+            or response.selected_options
+            or response.attachments
+        )
+    )
+
+
+def refresh_exercise_user_answers(exercise: Exercise) -> None:
+    exercise.user_answers = "\n\n".join(
+        f"### 第 {item.position} 题\n\n"
+        + (
+            f"选择：{', '.join(item.response.selected_options)}"
+            if item.response and item.response.selected_options
+            else "\n\n".join(
+                part
+                for part in (
+                    item.response.answer_markdown.strip() if item.response else "",
+                    (
+                        "附件：" + "、".join(
+                            attachment.original_name
+                            for attachment in item.response.attachments
+                        )
+                        if item.response and item.response.attachments
+                        else ""
+                    ),
+                )
+                if part
+            )
+            or "未作答"
+        )
+        for item in exercise.items
+    )
 
 
 @router.put("/exercise-items/{item_id}/response", response_model=ExerciseRead)
@@ -1957,26 +2319,151 @@ def update_exercise_response(
     response.selected_options_json = json.dumps(selected, ensure_ascii=False)
     response.status = (
         ExerciseResponseStatus.DRAFT
-        if payload.answer_markdown.strip() or selected
+        if payload.answer_markdown.strip() or selected or response.attachments
         else ExerciseResponseStatus.UNANSWERED
     )
     response.verdict = ""
     response.feedback_markdown = ""
     response.score = None
     item.exercise.status = "draft"
-    item.exercise.user_answers = "\n\n".join(
-        f"### 第 {saved.position} 题\n\n"
-        + (
-            f"选择：{', '.join(saved.response.selected_options)}"
-            if saved.response and saved.response.selected_options
-            else saved.response.answer_markdown
-            if saved.response
-            else "未作答"
-        )
-        for saved in item.exercise.items
-    )
+    refresh_exercise_user_answers(item.exercise)
     session.commit()
     return item.exercise
+
+
+@router.post(
+    "/exercise-items/{item_id}/attachments",
+    response_model=ExerciseRead,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_exercise_response_attachment(
+    item_id: int,
+    request: Request,
+    session: SessionDependency,
+    file: Annotated[UploadFile, File()],
+) -> Exercise:
+    item = session.get(ExerciseItem, item_id)
+    if item is None:
+        raise HTTPException(status_code=404, detail="练习题不存在")
+    if item.item_type in {ExerciseItemType.SINGLE_CHOICE, ExerciseItemType.MULTIPLE_CHOICE}:
+        raise HTTPException(status_code=422, detail="选择题不使用图片或 PDF 作答")
+    content = await file.read(MAX_ANSWER_ATTACHMENT_BYTES + 1)
+    if not content:
+        raise HTTPException(status_code=422, detail="附件内容为空")
+    if len(content) > MAX_ANSWER_ATTACHMENT_BYTES:
+        raise HTTPException(status_code=413, detail="单个附件不能超过 10 MB")
+    try:
+        media_type, extension = detected_media_type(content)
+        validate_image_dimensions(content, media_type)
+    except AnswerAttachmentError as error:
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    response = item.response
+    if response is not None and len(response.attachments) >= MAX_ANSWER_ATTACHMENTS:
+        raise HTTPException(status_code=422, detail="每道题最多上传 5 个附件")
+    digest = hashlib.sha256(content).hexdigest()
+    if response is not None and any(
+        attachment.sha256 == digest for attachment in response.attachments
+    ):
+        raise HTTPException(status_code=409, detail="这个附件已经上传过了")
+
+    root = request.app.state.answer_attachment_dir.resolve()
+    directory = root / f"item-{item.id}"
+    directory.mkdir(parents=True, exist_ok=True)
+    source_path = directory / f"{uuid4().hex}-{digest}{extension}"
+    try:
+        await run_in_threadpool(source_path.write_bytes, content)
+        extracted_text = await run_in_threadpool(extract_attachment_text, source_path, media_type)
+    except (AnswerAttachmentError, OSError) as error:
+        source_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=str(error)) from error
+
+    session.expire_all()
+    item = session.get(ExerciseItem, item_id)
+    if item is None:
+        source_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=404, detail="练习题不存在")
+    response = item.response
+    if response is None:
+        response = ExerciseResponse(exercise_item=item)
+        session.add(response)
+        session.flush()
+    if len(response.attachments) >= MAX_ANSWER_ATTACHMENTS:
+        source_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="每道题最多上传 5 个附件")
+    if any(attachment.sha256 == digest for attachment in response.attachments):
+        source_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=409, detail="这个附件已经上传过了")
+    remaining_text_chars = MAX_ANSWER_RESPONSE_TEXT_CHARS - sum(
+        len(attachment.extracted_text) for attachment in response.attachments
+    )
+    if remaining_text_chars <= 0:
+        source_path.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail="本题附件可用于批改的文字总量已达上限")
+    extracted_text_limit = min(
+        MAX_ANSWER_ATTACHMENT_TEXT_CHARS,
+        remaining_text_chars,
+    )
+    text_was_truncated = len(extracted_text) > extracted_text_limit
+    extracted_text = extracted_text[:extracted_text_limit]
+
+    attachment = ExerciseResponseAttachment(
+        exercise_response=response,
+        original_name=safe_original_name(file.filename, extension),
+        media_type=media_type,
+        size_bytes=len(content),
+        sha256=digest,
+        storage_path=str(source_path.relative_to(root)),
+        extracted_text=extracted_text,
+        processing_status="ready_truncated" if text_was_truncated else "ready",
+    )
+    session.add(attachment)
+    response.status = ExerciseResponseStatus.DRAFT
+    response.verdict = ""
+    response.feedback_markdown = ""
+    response.score = None
+    item.exercise.status = "draft"
+    refresh_exercise_user_answers(item.exercise)
+    try:
+        session.commit()
+    except Exception:
+        source_path.unlink(missing_ok=True)
+        raise
+    return item.exercise
+
+
+@router.delete(
+    "/exercise-response-attachments/{attachment_id}",
+    response_model=ExerciseRead,
+)
+def delete_exercise_response_attachment(
+    attachment_id: int,
+    request: Request,
+    session: SessionDependency,
+) -> Exercise:
+    attachment = session.get(ExerciseResponseAttachment, attachment_id)
+    if attachment is None:
+        raise HTTPException(status_code=404, detail="作答附件不存在")
+    response = attachment.exercise_response
+    exercise = response.exercise_item.exercise
+    storage_path = attachment.storage_path
+    session.delete(attachment)
+    session.flush()
+    response.status = (
+        ExerciseResponseStatus.DRAFT
+        if response.answer_markdown.strip()
+        or response.selected_options
+        or any(item.id != attachment_id for item in response.attachments)
+        else ExerciseResponseStatus.UNANSWERED
+    )
+    response.verdict = ""
+    response.feedback_markdown = ""
+    response.score = None
+    exercise.status = "draft"
+    refresh_exercise_user_answers(exercise)
+    session.commit()
+    remove_answer_attachment_files(request, [storage_path])
+    return exercise
 
 
 @router.post("/exercises/{exercise_id}/complete", response_model=ExerciseRead)
@@ -1989,11 +2476,7 @@ def complete_exercise(exercise_id: int, session: SessionDependency) -> Exercise:
     unanswered = [
         item.position
         for item in exercise.items
-        if item.response is None
-        or not (
-            item.response.answer_markdown.strip()
-            or json.loads(item.response.selected_options_json or "[]")
-        )
+        if not response_has_content(item.response)
     ]
     if unanswered:
         raise HTTPException(
@@ -2044,11 +2527,33 @@ def create_mistake(
     exercise = session.get(Exercise, exercise_id)
     if exercise is None:
         raise HTTPException(status_code=404, detail="练习不存在")
-    if payload.exercise_item_id is not None and not any(
-        item.id == payload.exercise_item_id for item in exercise.items
-    ):
-        raise HTTPException(status_code=422, detail="错题和练习题不属于同一组练习")
-    mistake = Mistake(exercise=exercise, **payload.model_dump())
+    values = payload.model_dump()
+    if payload.exercise_item_id is not None:
+        exercise_item = next(
+            (item for item in exercise.items if item.id == payload.exercise_item_id),
+            None,
+        )
+        if exercise_item is None:
+            raise HTTPException(status_code=422, detail="错题和练习题不属于同一组练习")
+        if exercise.status != "graded" or exercise_item.response is None:
+            raise HTTPException(status_code=422, detail="请先完成本题批改再整理错题")
+        if exercise_item.response.verdict not in {"incorrect", "partial"}:
+            raise HTTPException(status_code=422, detail="只有错误或部分正确的题目需要整理")
+        if any(mistake.exercise_item_id == exercise_item.id for mistake in exercise.mistakes):
+            raise HTTPException(status_code=409, detail="本题已经整理为错题")
+        selected_options = exercise_item.response.selected_options
+        values.update(
+            original_question=exercise_item.stem_markdown,
+            user_answer=(
+                exercise_item.response.answer_markdown
+                or (f"选择：{'、'.join(selected_options)}" if selected_options else "")
+            ),
+            correct_approach=exercise_item.reference_answer_markdown,
+            cause_analysis="",
+        )
+    elif not payload.original_question.strip() or not payload.correct_approach.strip():
+        raise HTTPException(status_code=422, detail="旧版错题需要填写原题和正确思路")
+    mistake = Mistake(exercise=exercise, **values)
     session.add(mistake)
     session.commit()
     return mistake
@@ -2183,7 +2688,7 @@ def save_preview_questions(
     record = load_daily_record(session, record_id)
     question_set = record.preview_question_set
     if question_set is None:
-        raise HTTPException(status_code=409, detail="请先生成明日预习问题提示词")
+        raise HTTPException(status_code=409, detail="请先生成下次回顾问题提示词")
     for field, value in payload.model_dump().items():
         setattr(question_set, field, value)
     session.commit()
@@ -2744,6 +3249,206 @@ def update_obsidian_vault(
     except NotePathError as error:
         raise HTTPException(status_code=422, detail=str(error)) from error
     return local_settings_response(request, session)
+
+
+def session_database_path(session: Session) -> Path:
+    database_name = session.get_bind().url.database
+    if not database_name:
+        raise HTTPException(status_code=500, detail="当前数据库不支持生成本地备份")
+    return Path(database_name).resolve()
+
+
+def backup_staging_path(runtime_data_dir: Path, token: str) -> Path:
+    if len(token) != 32 or any(character not in "0123456789abcdef" for character in token):
+        raise HTTPException(status_code=422, detail="备份暂存标识无效")
+    staging_root = (runtime_data_dir / "restore-staging").resolve()
+    staged_archive = (staging_root / f"{token}.zip").resolve()
+    if not staged_archive.is_relative_to(staging_root):
+        raise HTTPException(status_code=422, detail="备份暂存标识无效")
+    return staged_archive
+
+
+def cleanup_backup_runtime(runtime_data_dir: Path, now: float | None = None) -> None:
+    current_time = time.time() if now is None else now
+    for directory_name, pattern, max_age_seconds in (
+        ("restore-staging", "*.zip", 24 * 60 * 60),
+        ("restore-results", "*.json", 7 * 24 * 60 * 60),
+    ):
+        directory = runtime_data_dir / directory_name
+        if not directory.is_dir():
+            continue
+        for candidate in directory.glob(pattern):
+            with suppress(OSError):
+                if current_time - candidate.stat().st_mtime > max_age_seconds:
+                    candidate.unlink(missing_ok=True)
+
+
+@router.get("/backup/archive")
+def create_full_backup(
+    request: Request,
+    session: SessionDependency,
+) -> FileResponse:
+    database = session_database_path(session)
+    destination = request.app.state.runtime_data_dir / "backup-downloads"
+    try:
+        archive = create_backup_archive(
+            database,
+            request.app.state.material_dir,
+            destination,
+            keep=0,
+            attachments=request.app.state.answer_attachment_dir,
+            notes=managed_note_files(database),
+        )
+    except (ArchiveError, OSError) as error:
+        raise HTTPException(status_code=500, detail=f"生成备份失败：{error}") from error
+    if archive is None:
+        raise HTTPException(status_code=404, detail="当前没有可备份的学习数据")
+    return FileResponse(
+        archive,
+        media_type="application/zip",
+        filename=archive.name,
+        headers={
+            "Cache-Control": "no-store, private",
+            "Pragma": "no-cache",
+            "X-Content-Type-Options": "nosniff",
+        },
+        background=BackgroundTask(archive.unlink, missing_ok=True),
+    )
+
+
+@router.post("/backup/inspect", response_model=BackupInspectRead)
+async def inspect_uploaded_backup(
+    request: Request,
+    file: Annotated[UploadFile, File()],
+) -> BackupInspectRead:
+    cleanup_backup_runtime(request.app.state.runtime_data_dir)
+    token = uuid4().hex
+    staging_root = request.app.state.runtime_data_dir / "restore-staging"
+    staging_root.mkdir(parents=True, exist_ok=True)
+    staged_archive = staging_root / f"{token}.zip"
+    total = 0
+    try:
+        with staged_archive.open("wb") as target:
+            while chunk := await file.read(1024 * 1024):
+                total += len(chunk)
+                if total > 1024 * 1024 * 1024:
+                    raise ArchiveError("备份文件不能超过 1 GB")
+                target.write(chunk)
+        manifest = await run_in_threadpool(inspect_backup_archive, staged_archive)
+    except (ArchiveError, OSError, ValueError) as error:
+        staged_archive.unlink(missing_ok=True)
+        raise HTTPException(status_code=422, detail=f"备份校验失败：{error}") from error
+    files = manifest["files"]
+    includes_notes = any(item["path"].startswith("notes/") for item in files)
+    return BackupInspectRead(
+        token=token,
+        created_at=str(manifest.get("created_at") or ""),
+        format_version=int(manifest["format_version"]),
+        file_count=len(files),
+        total_size_bytes=sum(int(item.get("size") or 0) for item in files),
+        includes_materials=any(item["path"].startswith("materials/") for item in files),
+        includes_attachments=any(
+            item["path"].startswith("answer-attachments/") for item in files
+        ),
+        includes_notes=includes_notes,
+        requires_obsidian_vault=includes_notes,
+    )
+
+
+@router.delete("/backup/staged/{token}", status_code=status.HTTP_204_NO_CONTENT)
+def discard_staged_backup(token: str, request: Request) -> Response:
+    staged_archive = backup_staging_path(request.app.state.runtime_data_dir, token)
+    marker = request.app.state.runtime_data_dir / "restore.pending.json"
+    if marker.is_file():
+        with suppress(OSError, UnicodeDecodeError, json.JSONDecodeError):
+            marker_payload = json.loads(marker.read_text(encoding="utf-8"))
+            if marker_payload.get("token") == token:
+                raise HTTPException(status_code=409, detail="这个备份正在恢复，不能取消")
+    staged_archive.unlink(missing_ok=True)
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+@router.post("/backup/restore", response_model=BackupRestoreRead)
+async def request_backup_restore(
+    payload: BackupRestoreRequest,
+    request: Request,
+) -> BackupRestoreRead:
+    if request.app.state.shutdown_callback is None:
+        raise HTTPException(
+            status_code=409,
+            detail="恢复需要由 Lumina 桌面启动器管理服务，请从安装版打开后重试",
+        )
+    if not payload.confirm:
+        raise HTTPException(status_code=422, detail="需要明确确认后才能恢复备份")
+    staged_archive = backup_staging_path(
+        request.app.state.runtime_data_dir,
+        payload.token,
+    )
+    if not staged_archive.is_file():
+        raise HTTPException(status_code=404, detail="待恢复的备份已失效，请重新选择文件")
+    try:
+        manifest = await run_in_threadpool(inspect_backup_archive, staged_archive)
+    except (ArchiveError, OSError, ValueError) as error:
+        raise HTTPException(status_code=422, detail=f"备份校验失败：{error}") from error
+    includes_notes = any(item["path"].startswith("notes/") for item in manifest["files"])
+    vault_value = payload.obsidian_vault_path.strip()
+    if includes_notes and not vault_value:
+        raise HTTPException(
+            status_code=422,
+            detail="此备份包含小节笔记，请选择恢复到哪个 Obsidian Vault",
+        )
+    if vault_value:
+        vault = Path(vault_value).expanduser()
+        if not vault.is_absolute():
+            raise HTTPException(status_code=422, detail="Obsidian Vault 必须使用绝对路径")
+        try:
+            vault = vault.resolve(strict=True)
+        except OSError as error:
+            raise HTTPException(
+                status_code=422,
+                detail="Obsidian Vault 不存在或无法访问",
+            ) from error
+        if not vault.is_dir():
+            raise HTTPException(status_code=422, detail="Obsidian Vault 必须指向文件夹")
+        vault_value = str(vault)
+
+    marker = request.app.state.runtime_data_dir / "restore.pending.json"
+    if marker.exists():
+        raise HTTPException(status_code=409, detail="已有恢复任务正在等待执行")
+    temporary_marker = marker.with_suffix(".tmp")
+    temporary_marker.write_text(
+        json.dumps(
+            {
+                "token": payload.token,
+                "archive": str(staged_archive),
+                "obsidian_vault_path": vault_value,
+            },
+            ensure_ascii=False,
+        ),
+        encoding="utf-8",
+    )
+    temporary_marker.replace(marker)
+    asyncio.get_running_loop().call_later(0.4, request.app.state.shutdown_callback)
+    return BackupRestoreRead(token=payload.token, status="restarting")
+
+
+@router.get("/backup/restore-status", response_model=BackupRestoreRead)
+def get_backup_restore_status(
+    request: Request,
+    token: Annotated[str, Query(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")],
+) -> BackupRestoreRead:
+    result_path = request.app.state.runtime_data_dir / "restore-results" / f"{token}.json"
+    if not result_path.is_file():
+        return BackupRestoreRead(token=token, status="pending")
+    try:
+        result = json.loads(result_path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise HTTPException(status_code=500, detail=f"读取恢复结果失败：{error}") from error
+    return BackupRestoreRead(
+        token=token,
+        status=str(result.get("status") or "failed"),
+        detail=str(result.get("detail") or ""),
+    )
 
 
 @router.get("/notes", response_model=NoteIndexRead)

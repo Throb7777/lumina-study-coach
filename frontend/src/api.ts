@@ -78,8 +78,34 @@ export interface AiInteraction {
   feedback_text: string
 }
 
+export type GuidedReflectionKind = 'recall' | 'reconstruct'
+
+export interface GuidedQuestion {
+  id: string
+  question_markdown: string
+  focus: string
+}
+
+export interface GuidedQuestionReview {
+  id: string
+  verdict: 'correct' | 'partial' | 'incorrect'
+  feedback_markdown: string
+}
+
+export interface GuidedReflection {
+  id: number
+  daily_record_id: number
+  kind: GuidedReflectionKind
+  questions: GuidedQuestion[]
+  answers: Record<string, string>
+  reviews: GuidedQuestionReview[]
+  feedback_text: string
+}
+
 export type AiRunTask =
+  | 'recall_questions'
   | 'recall_review'
+  | 'reconstruction_questions'
   | 'reconstruction_review'
   | 'practice_generation'
   | 'exercise_grading'
@@ -157,6 +183,15 @@ export interface ExerciseResponse {
   verdict: string
   feedback_markdown: string
   score: number | null
+  attachments: ExerciseResponseAttachment[]
+}
+
+export interface ExerciseResponseAttachment {
+  id: number
+  original_name: string
+  media_type: string
+  size_bytes: number
+  processing_status: string
 }
 
 export interface ExerciseItem {
@@ -167,6 +202,7 @@ export interface ExerciseItem {
   difficulty: ExerciseDifficulty
   stem_markdown: string
   options: ExerciseOption[]
+  reference_answer_markdown: string
   source_refs: string[]
   response: ExerciseResponse | null
 }
@@ -184,10 +220,11 @@ export interface Mistake {
   status: MistakeStatus
 }
 
-export type MistakePayload = Omit<
-  Mistake,
-  'id' | 'exercise_id' | 'exercise_item_id' | 'status'
-> & { exercise_item_id?: number | null }
+export interface MistakePayload {
+  exercise_item_id?: number | null
+  error_content: string
+  error_type: MistakeType
+}
 
 export interface MistakeIndexItem extends Mistake {
   daily_record_id: number
@@ -250,6 +287,9 @@ export interface PreviewQuestionSet {
 }
 
 export interface PreviousPreviewQuestions {
+  daily_record_id: number
+  section_id: number
+  section_title: string
   study_date: string
   questions: string[]
 }
@@ -479,6 +519,24 @@ export interface ObsidianVaultCandidate {
   writable: boolean
 }
 
+export interface BackupPreview {
+  token: string
+  created_at: string
+  format_version: number
+  file_count: number
+  total_size_bytes: number
+  includes_materials: boolean
+  includes_attachments: boolean
+  includes_notes: boolean
+  requires_obsidian_vault: boolean
+}
+
+export interface BackupRestoreStatus {
+  token: string
+  status: 'pending' | 'restarting' | 'completed' | 'failed'
+  detail: string
+}
+
 export interface ObsidianVaultDiscovery {
   vaults: ObsidianVaultCandidate[]
   browse_supported: boolean
@@ -541,6 +599,7 @@ export interface DailyRecord {
   workflow_nodes: WorkflowNode[]
   previous_records: DailyRecordSummary[]
   ai_interactions: AiInteraction[]
+  guided_reflections: GuidedReflection[]
   exercises: Exercise[]
   preview_question_set: PreviewQuestionSet | null
   previous_preview_questions: PreviousPreviewQuestions | null
@@ -822,6 +881,20 @@ export const api = {
     request<AiInteraction>(`/api/daily-records/${recordId}/ai-review/${kind}`, {
       method: 'POST',
     }),
+  generateGuidedReflectionQuestions: (recordId: number, kind: GuidedReflectionKind) =>
+    request<GuidedReflection>(
+      `/api/daily-records/${recordId}/guided-reflections/${kind}/questions`,
+      { method: 'POST' },
+    ),
+  updateGuidedReflectionAnswers: (reflectionId: number, answers: Record<string, string>) =>
+    request<GuidedReflection>(`/api/guided-reflections/${reflectionId}/answers`, {
+      method: 'PUT',
+      body: JSON.stringify({ answers }),
+    }),
+  reviewGuidedReflection: (reflectionId: number) =>
+    request<GuidedReflection>(`/api/guided-reflections/${reflectionId}/review`, {
+      method: 'POST',
+    }),
   createAiInteraction: (recordId: number, kind: AiInteractionKind) =>
     request<AiInteraction>(`/api/daily-records/${recordId}/ai-prompts/${kind}`, {
       method: 'POST',
@@ -849,6 +922,15 @@ export const api = {
     method: 'PUT',
     body: JSON.stringify(payload),
   }),
+  uploadExerciseResponseAttachment: (itemId: number, file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return requestForm<Exercise>(`/api/exercise-items/${itemId}/attachments`, form)
+  },
+  deleteExerciseResponseAttachment: (attachmentId: number) =>
+    request<Exercise>(`/api/exercise-response-attachments/${attachmentId}`, {
+      method: 'DELETE',
+    }),
   completeExercise: (exerciseId: number) =>
     request<Exercise>(`/api/exercises/${exerciseId}/complete`, { method: 'POST' }),
   createGradingPrompt: (exerciseId: number) =>
@@ -877,13 +959,6 @@ export const api = {
     request<PreviewQuestionSet>(`/api/daily-records/${recordId}/ai-preview-questions`, {
       method: 'POST',
     }),
-  savePreviewQuestions: (
-    recordId: number,
-    payload: Pick<PreviewQuestionSet, 'question_1' | 'question_2' | 'question_3'>,
-  ) => request<PreviewQuestionSet>(`/api/daily-records/${recordId}/preview-questions`, {
-    method: 'PUT',
-    body: JSON.stringify(payload),
-  }),
   getSettings: (signal?: AbortSignal) => request<LocalSettings>('/api/settings', { signal }),
   getMaterialSearchSettings: (signal?: AbortSignal) =>
     request<MaterialSearchSettings>('/api/settings/material-search', { signal }),
@@ -916,6 +991,26 @@ export const api = {
       method: 'PUT',
       body: JSON.stringify({ obsidian_vault_path }),
     }),
+  createFullBackup: () => requestDownload('/api/backup/archive', { method: 'GET' }),
+  inspectBackup: (file: File) => {
+    const form = new FormData()
+    form.append('file', file)
+    return requestForm<BackupPreview>('/api/backup/inspect', form)
+  },
+  discardStagedBackup: (token: string) =>
+    request<void>(`/api/backup/staged/${encodeURIComponent(token)}`, {
+      method: 'DELETE',
+    }),
+  restoreBackup: (token: string, obsidian_vault_path: string) =>
+    request<BackupRestoreStatus>('/api/backup/restore', {
+      method: 'POST',
+      body: JSON.stringify({ token, obsidian_vault_path, confirm: true }),
+    }),
+  getBackupRestoreStatus: (token: string, signal?: AbortSignal) =>
+    request<BackupRestoreStatus>(
+      `/api/backup/restore-status?token=${encodeURIComponent(token)}`,
+      { signal },
+    ),
   getSectionNote: (sectionId: number, signal?: AbortSignal) =>
     request<SectionNote>(`/api/sections/${sectionId}/note`, { signal }),
   listNotes: (signal?: AbortSignal) => request<NoteIndex>('/api/notes', { signal }),

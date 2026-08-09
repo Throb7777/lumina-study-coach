@@ -18,7 +18,7 @@ def test_launcher_recognizes_only_the_study_web_health_payload() -> None:
         {
             "status": "ok",
             "service": "learning-flow-coach-api",
-            "version": "0.1.2",
+            "version": "0.1.3",
         }
     )
     assert not health_matches({"status": "ok", "service": "another-service"})
@@ -29,7 +29,7 @@ def test_launcher_requires_the_expected_ready_frontend_build() -> None:
     payload = {
         "status": "ok",
         "service": "learning-flow-coach-api",
-        "version": "0.1.2",
+        "version": "0.1.3",
         "frontend_build_id": "current-build",
         "frontend_ready": True,
     }

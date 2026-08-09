@@ -61,4 +61,12 @@ describe('Markdown math normalization', () => {
       '第一行  \n第二行\n\n```html\n<br>\n```',
     )
   })
+
+  it('repairs JSON control characters that replaced common LaTeX escapes', () => {
+    const source = '$P(\x07omega)=\x0crac{1}{2}$ and $\x08inom{n}{k}$'
+
+    expect(normalizeMarkdownMath(source)).toBe(
+      String.raw`$P(\omega)=\frac{1}{2}$ and $\binom{n}{k}$`,
+    )
+  })
 })

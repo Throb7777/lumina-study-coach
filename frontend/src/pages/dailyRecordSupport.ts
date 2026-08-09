@@ -52,8 +52,8 @@ export const nodeDescriptions: Record<string, string> = {
   reconstruct: '合上材料，用自己的语言重建内容',
   practice: '根据题目独立完成作答或推导',
   review: '对照反馈，定位并修正错误',
-  daily_close: '保存下一次衔接问题并结束今天的学习',
-  preview_questions: '为下一次学习留下三个思考问题',
+  daily_close: '生成下次回顾问题并结束今天的学习',
+  preview_questions: '为同一课程的下一次学习留下三个回顾问题',
   section_note: '整理并保存本小节的学习成果',
   daily_complete: '确认并结束今天的学习记录',
 }
@@ -65,22 +65,18 @@ export const nodeTitles: Record<string, string> = {
   practice: '练习与推导',
   review: '批改与纠错',
   daily_close: '今日收尾',
-  preview_questions: '预习问题',
+  preview_questions: '下次回顾问题',
   section_note: '小节笔记',
   daily_complete: '完成今日学习',
 }
 
 export const completionFields: Record<string, Array<[name: string, label: string]>> = {
   recall: [
-    ['recall_last_learned', '相关知识'],
-    ['recall_core_concepts', '核心概念'],
-    ['recall_clear_parts', '清晰部分'],
+    ['recall_last_learned', '自由回忆'],
   ],
   study: [['study_material_scope', '学习范围']],
   reconstruct: [
-    ['reconstruct_problem', '问题与目标'],
-    ['reconstruct_main_learning', '主要内容'],
-    ['reconstruct_math', '定义与推导'],
+    ['reconstruct_main_learning', '自由重构'],
   ],
   practice: [
     ['ai_questions', '练习题目'],
@@ -110,8 +106,8 @@ export function incompleteFields(
 }
 
 export interface MistakeDraftDiscardAction {
-  currentExerciseId: number
-  nextExerciseId: number | null
+  currentItemId: number
+  nextItemId: number | null
   trigger: HTMLButtonElement
 }
 
@@ -122,7 +118,14 @@ export interface PendingCompletionAction {
   trigger: HTMLElement
 }
 
-export type AiTaskKey = AiInteractionKind | 'practice' | 'grading' | 'preview_questions' | 'daily_summary'
+export type AiTaskKey =
+  | AiInteractionKind
+  | 'recall_questions'
+  | 'reconstruction_questions'
+  | 'practice'
+  | 'grading'
+  | 'preview_questions'
+  | 'daily_summary'
 
 export interface ActiveAiTask {
   key: AiTaskKey
@@ -136,7 +139,9 @@ export interface AiTaskFeedback {
 }
 
 export const aiTaskRunKeys: Record<AiTaskKey, AiRun['task']> = {
+  recall_questions: 'recall_questions',
   recall_review: 'recall_review',
+  reconstruction_questions: 'reconstruction_questions',
   reconstruction_review: 'reconstruction_review',
   practice: 'practice_generation',
   grading: 'exercise_grading',
@@ -151,11 +156,13 @@ export function aiRunPhase(run: AiRun | null) {
 }
 
 export const sourceTaskLabels: Record<string, string> = {
+  recall_questions: '回顾定向问题',
   recall_review: '回顾评阅',
+  reconstruction_questions: '重构定向问题',
   reconstruction_review: '重构检查',
   practice_generation: '练习生成',
   exercise_grading: '练习批改',
-  preview_questions: '预习问题',
+  preview_questions: '下次回顾问题',
   section_note_draft: '笔记整理',
   daily_summary: '今日摘要',
 }

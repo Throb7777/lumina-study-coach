@@ -9,13 +9,16 @@ FENCE_LINE = re.compile(r"^\s*(`{3,}|~{3,})")
 LIST_DISPLAY_START = re.compile(r"^(?P<indent>\s*)(?P<marker>(?:[-+*]|\d+[.)]))\s+\\\[\s*$")
 INLINE_DISPLAY_MATH = re.compile(r"\\\[(?P<body>[^\n]+?)\\\]")
 BROKEN_LATEX_ESCAPES = (
-    (re.compile(r"\x07(?=(?:c?dots)\b)"), "\\"),
-    (re.compile(r"\x08(?=egin\b)"), "\\b"),
+    (re.compile(r"\x07omega\b"), "\\omega"),
+    (re.compile(r"\x07(?=(?:cdots|dots)\b)"), "\\"),
+    (re.compile(r"\x07(?=(?:lpha|ngle|pprox|st)\b)"), "\\a"),
+    (re.compile(r"\x08(?=(?:egin|inom|eta)\b)"), "\\b"),
     (re.compile(r"\x0c(?=rac\b)"), "\\f"),
-    (re.compile(r"\x0b(?=dots\b)"), "\\v"),
-    (re.compile(r"\t(?=imes)"), "\\t"),
-    (re.compile(r"\r(?=ight\b)"), "\\r"),
+    (re.compile(r"\x0b(?=(?:dots|ec)\b)"), "\\v"),
+    (re.compile(r"\t(?=(?:imes|ext|heta)(?![A-Za-z]))"), "\\t"),
+    (re.compile(r"\r(?=(?:ight|ho)\b)"), "\\r"),
 )
+FORBIDDEN_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 HTML_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
 LATEX_BEGIN = re.compile(r"\\begin\{([^}]+)\}")
 LATEX_END = re.compile(r"\\end\{([^}]+)\}")
@@ -80,12 +83,23 @@ def normalize_ai_markdown(content: str) -> str:
         normalized.append(line.replace(r"\(", "$").replace(r"\)", "$"))
         index += 1
 
-    return "\n".join(normalized).strip()
+    result = "\n".join(normalized).strip()
+    if match := FORBIDDEN_CONTROL.search(result):
+        raise ValueError(
+            f"AI Markdown 包含无法识别的控制字符 U+{ord(match.group()):04X}"
+        )
+    return result
 
 
 def validate_note_markdown(content: str) -> tuple[str, list[MarkdownIssue]]:
-    normalized = normalize_ai_markdown(content)
     issues: list[MarkdownIssue] = []
+    try:
+        normalized = normalize_ai_markdown(content)
+    except ValueError:
+        normalized = normalize_ai_markdown(FORBIDDEN_CONTROL.sub("", content))
+        issues.append(
+            MarkdownIssue("forbidden_control", "内容包含无法识别的控制字符，已在预览中移除")
+        )
     active_fence: tuple[str, int] | None = None
     for line_number, line in enumerate(normalized.splitlines(), start=1):
         fence_match = FENCE_LINE.match(line)
@@ -102,6 +116,11 @@ def validate_note_markdown(content: str) -> tuple[str, list[MarkdownIssue]]:
 
     if normalized.count("$$") % 2:
         issues.append(MarkdownIssue("unmatched_display_math", "块级公式标记没有成对出现"))
+
+    inline_source = normalized.replace("$$", "")
+    inline_markers = re.findall(r"(?<!\\)\$", inline_source)
+    if len(inline_markers) % 2:
+        issues.append(MarkdownIssue("unmatched_inline_math", "行内公式标记没有成对出现"))
 
     begin_counts: dict[str, int] = {}
     end_counts: dict[str, int] = {}

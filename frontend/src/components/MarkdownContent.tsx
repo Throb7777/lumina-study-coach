@@ -52,3 +52,25 @@ export function MarkdownContent({ content, className = '' }: { content: string; 
     </div>
   )
 }
+
+export function MarkdownInlineContent({ content }: { content: string }) {
+  return (
+    <span className="markdown-inline-content">
+      <ReactMarkdown
+        remarkPlugins={[remarkGfm, remarkMath]}
+        rehypePlugins={[[rehypeKatex, { strict: false, throwOnError: false }]]}
+        components={{
+          p: ({ children }) => <span>{children}</span>,
+          h1: ({ children }) => <span>{children}</span>,
+          h2: ({ children }) => <span>{children}</span>,
+          h3: ({ children }) => <span>{children}</span>,
+          h4: ({ children }) => <span>{children}</span>,
+          h5: ({ children }) => <span>{children}</span>,
+          h6: ({ children }) => <span>{children}</span>,
+        }}
+      >
+        {normalizeMarkdownMath(content)}
+      </ReactMarkdown>
+    </span>
+  )
+}

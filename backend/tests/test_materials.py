@@ -43,7 +43,7 @@ class MaterialSessionCodex:
                             "position": position,
                             "item_type": "single_choice" if position <= 4 else "short_answer",
                             "difficulty": "basic",
-                            "stem_markdown": f"Question {position}",
+                            "stem_markdown": f"Question set {call_number}, item {position}",
                             "options": (
                                 [{"id": "A", "label": "Option A"}]
                                 if position <= 4
@@ -876,6 +876,7 @@ def test_recall_uses_previous_record_material_version(
         previous = DailyRecord(
             section_id=section["id"],
             study_date=date.today() - timedelta(days=1),
+            is_completed=True,
         )
         session.add(previous)
         session.flush()

@@ -1,4 +1,4 @@
-from app.models import DailyRecord, Exercise, ExerciseItem, ExerciseItemType
+from app.models import DailyRecord, Exercise, ExerciseItem, ExerciseItemType, GuidedReflection
 
 MARKDOWN_MATH_RULES = """输出格式要求：
 - 使用清晰的 Markdown，不要在最外层包裹 Markdown 代码块
@@ -11,6 +11,15 @@ STRUCTURED_RESULT_RULES = """请同时返回：
 - `display_markdown`：直接展示给学习者的完整 Markdown
 - `handoff`：供后续流程使用的精简结构化结论，不要复制整篇展示内容
 - 使用参考材料形成判断时，在展示内容中用 `[材料标题，页码/时间段/网页正文]` 标注依据
+- `handoff.source_refs` 只保留本次实际使用过的材料分块；每条返回 `material_id`、
+  `chunk_positions` 和一句简短 `evidence_summary`，编号必须来自材料中的 `[M编号:C编号]`
+- 没有直接使用材料时，`handoff.source_refs` 返回空数组
+输出必须符合系统指定的 JSON 结构。"""
+
+NOTE_STRUCTURED_RESULT_RULES = """请同时返回：
+- `display_markdown`：直接展示给学习者的完整 Markdown 笔记
+- 笔记正文不要输出材料引用、来源标记或来源清单
+- `handoff`：供后续流程使用的精简结构化结论，不要复制整篇展示内容
 - `handoff.source_refs` 只保留本次实际使用过的材料分块；每条返回 `material_id`、
   `chunk_positions` 和一句简短 `evidence_summary`，编号必须来自材料中的 `[M编号:C编号]`
 - 没有直接使用材料时，`handoff.source_refs` 返回空数组
@@ -48,6 +57,121 @@ def daily_summary_prompt(source: str) -> str:
 总长度尽量控制在 800 个中文字符以内。材料引用仅在确实用于核对时保留。
 同时返回更新后的 `section_memory` 和 `chapter_memory`。它们是完整的当前版本，
 需要合并上下文中已有记忆与今日新增成果，不得丢失仍然有效的旧内容。
+
+{MARKDOWN_MATH_RULES}
+{STRUCTURED_RESULT_RULES}
+"""
+
+
+def recall_questions_prompt(
+    record: DailyRecord,
+    source_record: DailyRecord | None = None,
+) -> str:
+    source_label = (
+        f"{source_record.study_date} · {source_record.section.title}"
+        if source_record is not None
+        else "暂无上次已完成学习"
+    )
+    source_scope = source_record.study_material_scope if source_record is not None else ""
+    return f"""你是一名善于追问的学习教练。学习者先做了一次不看材料的自由回忆。
+请只围绕上一次已完成学习及其可靠材料，生成恰好 3 个有方向、可直接作答的定向问题。
+
+回顾对象：{source_label}
+上次学习范围：{source_scope or "未填写"}
+学习者的自由回忆：
+{record.recall_last_learned or "未填写"}
+
+三个问题应分别尽量覆盖：
+1. 相关知识或核心概念之间的关系；
+2. 关键条件、边界、步骤或推导；
+3. 一个具体例子、反例或迁移应用。
+
+要求：
+- 问题必须针对学习者实际写出的内容，指出明确对象，不得让学习者“任选一个主题/场景/研究背景”；
+- 不得考查当前即将学习但上次尚未学习的内容；
+- 每个问题只问一个主要任务，单独阅读即可理解；
+- 不要在问题中泄露答案，也不要评价学习者；
+- `id` 依次使用 `q1`、`q2`、`q3`；
+- `focus` 用一句短语说明该问题检查的知识点；
+- 输出必须严格符合系统指定的 JSON 结构。
+"""
+
+
+def reconstruction_questions_prompt(record: DailyRecord) -> str:
+    return f"""你是一名主动学习教练。学习者已用自己的话重构了本次内容。
+请根据其重构和可靠材料，生成恰好 3 个有方向、可直接作答的定向问题。
+
+学习范围：{record.study_material_scope or "未填写"}
+学习者的自由重构：
+{record.reconstruct_main_learning or "未填写"}
+
+三个问题应分别尽量覆盖：
+1. 学习者表述中缺少的关键概念、结构或因果链；
+2. 重要定义、适用条件、步骤或数学关系；
+3. 一个已指定对象和条件的具体应用、比较或检验。
+
+要求：
+- 必须针对学习者实际写出的内容补足方向，不得让学习者“任选一个主题/系统/研究背景”；
+- 每个问题只问一个主要任务，题面给足对象、条件和交付物；
+- 不要在问题中泄露答案，也不要评价学习者；
+- `id` 依次使用 `q1`、`q2`、`q3`；
+- `focus` 用一句短语说明该问题检查的知识点；
+- 输出必须严格符合系统指定的 JSON 结构。
+"""
+
+
+def guided_reflection_review_prompt(
+    record: DailyRecord,
+    reflection: GuidedReflection,
+    source_record: DailyRecord | None = None,
+) -> str:
+    seed_label = "自由回忆" if reflection.kind.value == "recall" else "自由重构"
+    seed = (
+        record.recall_last_learned
+        if reflection.kind.value == "recall"
+        else record.reconstruct_main_learning
+    )
+    answers = reflection.answers
+    source_label = (
+        f"{source_record.study_date} · {source_record.section.title}"
+        if reflection.kind.value == "recall" and source_record is not None
+        else record.section.title
+    )
+    source_scope = (
+        source_record.study_material_scope
+        if reflection.kind.value == "recall" and source_record is not None
+        else record.study_material_scope
+    )
+    question_blocks = []
+    for question in reflection.questions:
+        question_id = str(question.get("id", ""))
+        question_blocks.append(
+            f"问题：{question.get('question_markdown', '')}\n"
+            f"学习者回答：{answers.get(question_id, '') or '未回答'}"
+        )
+    return f"""你是一名严谨的学习教练。
+请综合评阅学习者的{seed_label}和 3 个定向问题回答。
+不要继续追问，也不要替学习者重写整份笔记。
+
+评阅对象：{source_label}
+学习范围：{source_scope or "未填写"}
+学习者的{seed_label}：
+{seed or "未填写"}
+
+定向问题与回答：
+{chr(10).join(question_blocks)}
+
+展示内容按以下结构组织：
+1. 已经理解准确、表达清楚的部分；
+2. 明显遗漏、混淆或条件不完整的部分；
+3. 结合可靠材料给出的关键纠正；
+4. 一条具体、可执行的后续复习建议。
+
+同时对 q1、q2、q3 分别返回结构化评阅：
+- `verdict` 只能是 correct、partial 或 incorrect；
+- `feedback_markdown` 必须对应该题实际回答，指出判断依据；
+- 回答错误或不完整时给出正确思路，但不要扩写成整份课程笔记；
+- `display_markdown` 只放三题之外的整体总结，避免重复逐题反馈。
 
 {MARKDOWN_MATH_RULES}
 {STRUCTURED_RESULT_RULES}
@@ -96,12 +220,9 @@ def reconstruction_review_prompt(record: DailyRecord, previous_records: list[Dai
 """
 
 
-def practice_generation_prompt(record: DailyRecord, previous_records: list[DailyRecord]) -> str:
+def practice_generation_prompt(record: DailyRecord, excluded_questions: list[str]) -> str:
     previous_practice = "\n".join(
-        exercise.ai_questions[:3000]
-        for previous in previous_records
-        for exercise in previous.exercises
-        if exercise.ai_questions.strip()
+        f"- {question[:500]}" for question in excluded_questions[:80] if question.strip()
     ) or "暂无"
     return f"""你是一名严谨的学习练习设计者。请生成今天必须完成的一套结构化练习。
 面向学习者的题干中不得出现答案、提示或解题步骤；答案和评分标准只放入隐藏字段。
@@ -109,7 +230,7 @@ def practice_generation_prompt(record: DailyRecord, previous_records: list[Daily
 今日学习范围：{record.study_material_scope or "未填写"}
 今日主要学习内容：{record.reconstruct_main_learning or "未填写"}
 数学定义或推导：{record.reconstruct_math or "未填写"}
-前两次练习摘要（用于避免重复）：
+材料中已有题目、例子以及本小节历史练习题干（禁止重复）：
 {previous_practice}
 
 生成恰好 12 道题，并满足：
@@ -118,7 +239,14 @@ def practice_generation_prompt(record: DailyRecord, previous_records: list[Daily
 - 不适合证明题的学科用分析或方法比较替代，不得机械凑题型
 - 难度覆盖基础、中等、挑战，且由浅入深
 - 至少 70% 聚焦今日学习内容，其余用于前置知识衔接和既有薄弱点
-- 不重复之前的题干；允许围绕同一薄弱点更换条件和思考角度
+- 不得复述、轻微改写或只替换数字/名词来复用材料中的题目、示例及历史题干
+- 如果考查相同知识点，至少同时改变以下维度中的 3 项：
+  任务目标、已知条件、对象/数据、表示方式、推理路径、答案形式
+- 题面必须指定明确对象、条件、所需输出和必要数据；不得要求学习者
+  “结合你的研究背景”“任选/自选一个现象、系统、场景或案例”后自行补题
+- 开放题最多 2 道，且仍须给定具体对象与边界；优先使用可判定的概念辨析、
+  条件判断、计算、推导、纠错和具体案例分析
+- 应用题应直接给出一个与本节材料有关的具体情境，而不是把选择情境的责任交给学习者
 - 每道题独立包含 `position`、`item_type`、`difficulty`、Markdown 题干、选项、
   隐藏答案、评分标准和实际材料定位
 - 选择题选项使用稳定 ID `A`、`B`、`C`、`D`
@@ -138,6 +266,10 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
         for item in exercise.items:
             response = item.response
             local_verdict = deterministic_choice_verdict(item)
+            attachment_text = "\n\n".join(
+                f"附件 {attachment.original_name}（OCR/文本提取）：\n{attachment.extracted_text}"
+                for attachment in (response.attachments if response else [])
+            )
             item_blocks.append(
                 f"""第 {item.position} 题
 题型：{item.item_type.value}
@@ -147,6 +279,7 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
 评分标准：{item.rubric_markdown}
 我的选择：{response.selected_options_json if response else "[]"}
 我的作答：{response.answer_markdown if response else "未作答"}
+作答附件：{attachment_text or "无"}
 本地选择题判定：{local_verdict or "不适用，由你依据评分标准判断"}"""
             )
         return f"""你是一名严谨的练习批改助手。请一次批改整套 12 道题，不要继续追问。
@@ -195,17 +328,17 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
 
 def preview_questions_prompt(record: DailyRecord, previous_records: list[DailyRecord]) -> str:
     del previous_records
-    return f"""你是一名学习流程教练。请生成下一次学习前要思考的问题。
+    return f"""你是一名学习流程教练。请生成供同一课程下一次学习开场闭卷回顾的问题。
 不要回答问题，不要继续追问，也不要生成超过 3 条。
 
 今日学习范围：{record.study_material_scope or "未填写"}
 今日主要学习内容：{record.reconstruct_main_learning or "未填写"}
 今日数学定义或推导：{record.reconstruct_math or "未填写"}
 
-生成恰好 3 条预习思考问题：
-- 围绕当前小节接下来最值得继续理解的内容
-- 兼顾概念连接、推导条件和应用思考
-- 每条独立、具体，适合下次学习开始时先思考
+生成恰好 3 条下次回顾问题：
+- 只围绕今天已经学习的内容，不引入下一次尚未学习的新知识
+- 兼顾概念连接、推导条件和应用边界
+- 每条独立、具体，适合下一次学习开始时闭卷回答
 - 不提供答案
 
 {STRUCTURED_RESULT_RULES}
@@ -275,7 +408,7 @@ def section_note_prompt(
 或纠错过程；它们只可用于帮助判断哪些知识需要解释得更清楚，不应成为笔记章节。
 
 {MARKDOWN_MATH_RULES}
-{STRUCTURED_RESULT_RULES}
+{NOTE_STRUCTURED_RESULT_RULES}
 """
 
 

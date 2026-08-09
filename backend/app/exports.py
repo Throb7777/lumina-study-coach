@@ -133,7 +133,7 @@ def _daily_record_markdown(record: DailyRecord, section: Section) -> str:
             if question.strip()
         ]
         if values:
-            lines.extend(("## 明日预习问题", ""))
+            lines.extend(("## 下次回顾问题", ""))
             lines.extend(f"- {question}" for question in values)
             lines.append("")
     return "\n".join(lines)

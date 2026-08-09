@@ -66,16 +66,6 @@ function formatStudyDate(value: string, today: string) {
   return year === currentYear ? `${month}月${day}日` : `${year}年${month}月${day}日`
 }
 
-function historyStorageKey(courseId: number) {
-  return `learning-flow-coach.course-${courseId}.expanded-history`
-}
-
-function readExpandedHistory(courseId?: number) {
-  if (!courseId) return null
-  const value = Number(sessionStorage.getItem(historyStorageKey(courseId)))
-  return Number.isInteger(value) && value > 0 ? value : null
-}
-
 type EditTarget =
   | { kind: 'course' }
   | { kind: 'chapter'; chapter: Chapter }
@@ -167,9 +157,7 @@ export function CourseDetailPage() {
   const [materialDialogTrigger, setMaterialDialogTrigger] = useState<HTMLElement | null>(null)
   const [materialError, setMaterialError] = useState('')
   const [courseCompletionBusy, setCourseCompletionBusy] = useState(false)
-  const [expandedHistorySectionId, setExpandedHistorySectionId] = useState<number | null>(
-    () => readExpandedHistory(routeData.course?.id),
-  )
+  const [expandedHistorySectionId, setExpandedHistorySectionId] = useState<number | null>(null)
   const [showAllHistory, setShowAllHistory] = useState(false)
   const pageRef = useRef<HTMLElement>(null)
   const outlineDraftSignature = course
@@ -590,7 +578,6 @@ export function CourseDetailPage() {
       setError('请先保存或清空章节、小节草稿，再进入学习')
       return
     }
-    rememberHistorySection(section.id)
     setOpeningSectionId(section.id)
     try {
       const record = await api.openTodayRecord(section.id)
@@ -643,7 +630,6 @@ export function CourseDetailPage() {
           }))
           break
         case 'continue-section': {
-          rememberHistorySection(action.section.id)
           const record = await api.openTodayRecord(action.section.id, true)
           navigate(`/daily-records/${record.id}`)
           break
@@ -658,21 +644,13 @@ export function CourseDetailPage() {
     }
   }
 
-  function rememberHistorySection(sectionId: number) {
-    if (!course) return
-    sessionStorage.setItem(historyStorageKey(course.id), String(sectionId))
-    setExpandedHistorySectionId(sectionId)
-  }
-
   function toggleSectionHistory(sectionId: number) {
-    if (!course) return
     if (expandedHistorySectionId === sectionId) {
-      sessionStorage.removeItem(historyStorageKey(course.id))
       setExpandedHistorySectionId(null)
       setShowAllHistory(false)
       return
     }
-    rememberHistorySection(sectionId)
+    setExpandedHistorySectionId(sectionId)
     setShowAllHistory(false)
   }
 
@@ -911,7 +889,6 @@ export function CourseDetailPage() {
                                 to={`/daily-records/${dailyRecord.id}`}
                                 key={dailyRecord.id}
                                 aria-label={`${dailyRecord.study_date} · ${dailyRecord.is_completed ? '当次完成' : '未完成'}`}
-                                onClick={() => rememberHistorySection(section.id)}
                               >
                                 <span className="section-history__date">
                                   {dailyRecord.study_date === todayDate && <strong>今天 · </strong>}

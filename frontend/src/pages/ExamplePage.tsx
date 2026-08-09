@@ -218,11 +218,14 @@ function PracticeExample() {
             <div><strong>本题反馈</strong><span>{verdictLabels[item.response.verdict]}</span></div>
             <MarkdownContent content={item.response.feedback_markdown} />
           </section>
-          {item.source_refs.length > 0 && <p className="exercise-source">依据：{item.source_refs.join('；')}</p>}
           <div className="exercise-question-footer">
-            <button className="secondary-button" type="button" disabled={item.position === 1} onClick={() => setPosition(item.position - 1)}><ChevronLeft size={16} />上一题</button>
+            {item.position > 1 ? (
+              <button className="secondary-button" type="button" onClick={() => setPosition(item.position - 1)}><ChevronLeft size={16} />上一题</button>
+            ) : <span className="exercise-nav-spacer" aria-hidden="true" />}
             <span>逐题复核 {item.position}/{example.exercise.items.length}</span>
-            <button className="secondary-button" type="button" disabled={item.position === example.exercise.items.length} onClick={() => setPosition(item.position + 1)}>下一题<ChevronRight size={16} /></button>
+            {item.position < example.exercise.items.length ? (
+              <button className="secondary-button" type="button" onClick={() => setPosition(item.position + 1)}>下一题<ChevronRight size={16} /></button>
+            ) : <span className="exercise-nav-spacer" aria-hidden="true" />}
           </div>
         </article>
       </div>

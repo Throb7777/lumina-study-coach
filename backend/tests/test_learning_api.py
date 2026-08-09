@@ -1,3 +1,4 @@
+import os
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI
@@ -5,6 +6,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session, sessionmaker
 
+from app.api import cleanup_backup_runtime
 from app.models import (
     AiInteraction,
     Chapter,
@@ -161,3 +163,79 @@ def test_course_list_prioritizes_recent_activity_and_places_completed_last(
         datetime.fromisoformat(course["created_at"].replace("Z", "+00:00")).tzinfo == UTC
         for course in courses
     )
+
+
+def test_full_backup_can_be_downloaded_validated_and_staged(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    course = client.post("/api/courses", json={"name": "备份课程"})
+    assert course.status_code == 201
+
+    backup = client.get("/api/backup/archive")
+    assert backup.status_code == 200
+    assert backup.headers["content-type"] == "application/zip"
+    assert "lumina-backup-" in backup.headers["content-disposition"]
+    assert "no-store" in backup.headers["cache-control"]
+    assert backup.headers["pragma"] == "no-cache"
+    assert backup.headers["x-content-type-options"] == "nosniff"
+
+    inspected = client.post(
+        "/api/backup/inspect",
+        files={"file": ("lumina-backup.zip", backup.content, "application/zip")},
+    )
+    assert inspected.status_code == 200
+    preview = inspected.json()
+    assert preview["format_version"] == 2
+    assert preview["file_count"] >= 1
+    assert preview["total_size_bytes"] > 0
+    assert preview["includes_notes"] is False
+
+    restore = client.post(
+        "/api/backup/restore",
+        json={
+            "token": preview["token"],
+            "obsidian_vault_path": "",
+            "confirm": True,
+        },
+    )
+    assert restore.status_code == 409
+    assert "桌面启动器" in restore.json()["detail"]
+
+    staged_archive = (
+        app.state.runtime_data_dir / "restore-staging" / f"{preview['token']}.zip"
+    )
+    assert staged_archive.is_file()
+    discarded = client.delete(f"/api/backup/staged/{preview['token']}")
+    assert discarded.status_code == 204
+    assert not staged_archive.exists()
+
+    invalid = client.post(
+        "/api/backup/inspect",
+        files={"file": ("broken.zip", b"not-a-zip", "application/zip")},
+    )
+    assert invalid.status_code == 422
+    assert "备份校验失败" in invalid.json()["detail"]
+
+
+def test_expired_backup_staging_is_cleaned_up(tmp_path) -> None:
+    staging = tmp_path / "restore-staging"
+    results = tmp_path / "restore-results"
+    staging.mkdir()
+    results.mkdir()
+    expired_archive = staging / f"{'a' * 32}.zip"
+    fresh_archive = staging / f"{'b' * 32}.zip"
+    expired_result = results / f"{'c' * 32}.json"
+    expired_archive.write_bytes(b"old")
+    fresh_archive.write_bytes(b"fresh")
+    expired_result.write_text("{}", encoding="utf-8")
+    now = 2_000_000_000.0
+    os.utime(expired_archive, (now - 25 * 60 * 60, now - 25 * 60 * 60))
+    os.utime(fresh_archive, (now - 60, now - 60))
+    os.utime(expired_result, (now - 8 * 24 * 60 * 60, now - 8 * 24 * 60 * 60))
+
+    cleanup_backup_runtime(tmp_path, now=now)
+
+    assert not expired_archive.exists()
+    assert fresh_archive.exists()
+    assert not expired_result.exists()

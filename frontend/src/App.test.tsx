@@ -38,6 +38,7 @@ const dailyRecord = {
   workflow_nodes: workflowNodes,
   previous_records: [],
   ai_interactions: [],
+  guided_reflections: [],
   exercises: [],
   preview_question_set: null,
   previous_preview_questions: null,
@@ -70,6 +71,7 @@ const structuredExerciseItems = Array.from({ length: 12 }, (_, index) => {
     difficulty: position <= 4 ? 'basic' : 'intermediate',
     stem_markdown: `Question ${position}`,
     options: choice ? [{ id: 'A', label: 'Option A' }, { id: 'B', label: 'Option B' }] : [],
+    reference_answer_markdown: `Correct answer ${position}`,
     rubric_markdown: 'Rubric',
     source_refs: [],
     response: {
@@ -80,6 +82,7 @@ const structuredExerciseItems = Array.from({ length: 12 }, (_, index) => {
       verdict: '',
       feedback_markdown: '',
       score: null,
+      attachments: [],
     },
   }
 })
@@ -194,7 +197,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.2',
+          service_version: '0.1.3',
           desktop_launch: true,
         })
       }
@@ -209,7 +212,7 @@ describe('App', () => {
     renderApp(['/settings'])
 
     expect(await screen.findByText('Lumina 本地服务已连接')).toBeInTheDocument()
-    expect(screen.getByText('v0.1.2 · 本地数据服务运行正常')).toBeInTheDocument()
+    expect(screen.getByText('v0.1.3 · 本地数据服务运行正常')).toBeInTheDocument()
     expect(screen.getByText('Lumina')).toBeInTheDocument()
     expect(screen.queryByRole('link', { name: '运行状态' })).not.toBeInTheDocument()
   })
@@ -220,7 +223,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.2',
+          service_version: '0.1.3',
           desktop_launch: false,
         })
       }
@@ -449,7 +452,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.2',
+          service_version: '0.1.3',
           desktop_launch: false,
         })
       }
@@ -548,7 +551,7 @@ describe('App', () => {
     expect(window.dispatchEvent(dirtyEvent)).toBe(false)
     expect(dirtyEvent.defaultPrevented).toBe(true)
 
-    await user.click(screen.getByRole('button', { name: '保存' }))
+    await user.click(screen.getByRole('button', { name: '保存回忆' }))
     expect(await screen.findByText('内容已保存')).toBeInTheDocument()
     const cleanEvent = new Event('beforeunload', { cancelable: true })
 
@@ -687,7 +690,6 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: '2026-07-19 · 未完成' })).toHaveAttribute('href', '/daily-records/5')
     expect(screen.getByRole('link', { name: '2026-07-16 · 当次完成' })).toHaveAttribute('href', '/daily-records/3')
     expect(screen.queryByRole('link', { name: '2026-07-15 · 未完成' })).not.toBeInTheDocument()
-    expect(sessionStorage.getItem('learning-flow-coach.course-1.expanded-history')).toBe('1')
 
     await user.click(screen.getByRole('button', { name: '查看全部 5 次' }))
     expect(screen.getByRole('link', { name: '2026-07-14 · 当次完成' })).toHaveAttribute('href', '/daily-records/1')
@@ -697,7 +699,6 @@ describe('App', () => {
     expect(secondHistory).toHaveAttribute('aria-expanded', 'true')
     expect(screen.queryByRole('link', { name: '2026-07-19 · 未完成' })).not.toBeInTheDocument()
     expect(screen.getByRole('link', { name: '2026-07-13 · 未完成' })).toHaveAttribute('href', '/daily-records/7')
-    expect(sessionStorage.getItem('learning-flow-coach.course-1.expanded-history')).toBe('2')
   })
 
   it('uses continue learning when the section already has a record for today', async () => {
@@ -724,14 +725,14 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '继续学习' })).toBeInTheDocument()
   })
 
-  it('restores the last opened section history in the current browser session', async () => {
+  it('starts section history collapsed even when an older session stored an expanded section', async () => {
     sessionStorage.setItem('learning-flow-coach.course-1.expanded-history', '2')
     vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse(courseWithRecordHistory)))
 
     renderApp(['/courses/1'])
 
-    expect(await screen.findByRole('button', { name: /学习记录 2 次/ })).toHaveAttribute('aria-expanded', 'true')
-    expect(screen.getByRole('link', { name: '2026-07-13 · 未完成' })).toBeInTheDocument()
+    expect(await screen.findByRole('button', { name: /学习记录 2 次/ })).toHaveAttribute('aria-expanded', 'false')
+    expect(screen.queryByRole('link', { name: '2026-07-13 · 未完成' })).not.toBeInTheDocument()
     expect(screen.getByRole('button', { name: /学习记录 5 次/ })).toHaveAttribute('aria-expanded', 'false')
   })
 
@@ -937,15 +938,7 @@ describe('App', () => {
     expect(screen.getByRole('link', { name: '返回' })).toHaveAttribute('href', '/courses/1')
     expect(screen.queryByText('返回课程')).not.toBeInTheDocument()
     await user.type(screen.getByLabelText(/相关知识/), '条件概率的基本定义')
-    await user.click(screen.getAllByRole('button', { name: '保存并完成' })[0])
-
-    const incompleteDialog = await screen.findByRole('dialog', { name: '还有内容未完成' })
-    expect(within(incompleteDialog).getByText('请检查：核心概念、清晰部分。')).toBeInTheDocument()
-    expect(within(incompleteDialog).queryByText(/空格/)).not.toBeInTheDocument()
-    expect(fetchMock).toHaveBeenCalledTimes(1)
-    fireEvent.mouseDown(incompleteDialog)
-    expect(incompleteDialog).toBeInTheDocument()
-    await user.click(within(incompleteDialog).getByRole('button', { name: '仍然完成' }))
+    await user.click(screen.getByRole('button', { name: 'AI 不可用？仅保存并完成' }))
 
     expect(await screen.findByText('内容已保存，节点已完成')).toBeInTheDocument()
     expect(screen.getByRole('button', { name: '展开闭卷回顾' })).toHaveAttribute('aria-expanded', 'false')
@@ -1082,6 +1075,93 @@ describe('App', () => {
     }))
   })
 
+  it('hides unavailable previous and next controls at exercise boundaries', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse({
+      ...dailyRecord,
+      exercises: [structuredExercise],
+    })))
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    await user.click(await screen.findByRole('button', { name: '展开练习与推导' }))
+    expect(screen.queryByRole('button', { name: '上一题' })).not.toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '下一题' })).toBeInTheDocument()
+    const navigation = screen.getByRole('navigation', { name: '练习题导航' })
+    await user.click(within(navigation).getByRole('button', { name: '12' }))
+    expect(screen.getByRole('button', { name: '上一题' })).toBeInTheDocument()
+    expect(screen.queryByRole('button', { name: '下一题' })).not.toBeInTheDocument()
+  })
+
+  it('uploads a compact image or PDF attachment only for non-choice answers', async () => {
+    const attachment = {
+      id: 301,
+      original_name: 'handwritten.png',
+      media_type: 'image/png',
+      size_bytes: 2048,
+      processing_status: 'ready',
+    }
+    const updatedExercise = {
+      ...structuredExercise,
+      items: structuredExerciseItems.map((item) => item.position === 5 ? {
+        ...item,
+        response: { ...item.response, status: 'draft', attachments: [attachment] },
+      } : item),
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({ ...dailyRecord, exercises: [structuredExercise] }))
+      .mockImplementationOnce(() => jsonResponse(updatedExercise, 201))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    await user.click(await screen.findByRole('button', { name: '展开练习与推导' }))
+    expect(screen.queryByText('添加附件')).not.toBeInTheDocument()
+    const navigation = screen.getByRole('navigation', { name: '练习题导航' })
+    await user.click(within(navigation).getByRole('button', { name: '5' }))
+    const input = screen.getByText('添加附件').closest('label')?.querySelector('input[type="file"]')
+    expect(input).toBeInstanceOf(HTMLInputElement)
+    await user.upload(input as HTMLInputElement, new File(['image'], 'handwritten.png', { type: 'image/png' }))
+
+    expect(await screen.findByText('handwritten.png')).toBeInTheDocument()
+    expect(screen.getByText('2 KB')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/exercise-items/105/attachments',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    )
+  })
+
+  it('keeps practice navigation available while an attachment is processing', async () => {
+    let finishUpload: ((response: Awaited<ReturnType<typeof jsonResponse>>) => void) | undefined
+    const pendingUpload = new Promise<Awaited<ReturnType<typeof jsonResponse>>>((resolve) => {
+      finishUpload = resolve
+    })
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({ ...dailyRecord, exercises: [structuredExercise] }))
+      .mockImplementationOnce(() => pendingUpload)
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+    await user.click(await screen.findByRole('button', { name: '展开练习与推导' }))
+    await user.click(within(screen.getByRole('navigation', { name: '练习题导航' })).getByRole('button', { name: '5' }))
+    const input = screen.getByText('添加附件').closest('label')?.querySelector('input[type="file"]')
+    const upload = user.upload(
+      input as HTMLInputElement,
+      new File(['image'], 'pending.png', { type: 'image/png' }),
+    )
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(2))
+
+    expect(screen.getByRole('button', { name: '下一题' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '完成今日练习' })).toBeEnabled()
+    expect(screen.getByText('处理中')).toBeInTheDocument()
+
+    finishUpload?.(await jsonResponse(structuredExercise, 201))
+    await upload
+  })
+
   it('renders formulas inside structured exercise options', async () => {
     const formulaExercise = {
       ...structuredExercise,
@@ -1215,24 +1295,46 @@ describe('App', () => {
     }))
   })
 
-  it('starts mistake organization from the first incorrect structured item', async () => {
+  it('binds mistake organization to the currently reviewed incorrect item', async () => {
     const gradedItems = structuredExerciseItems.map((item) => ({
       ...item,
+      source_refs: item.position === 5 ? ['教材第 3 页'] : [],
       response: {
         ...item.response,
-        verdict: item.position === 3 ? 'incorrect' : 'correct',
-        score: item.position === 3 ? 0 : 100,
+        verdict: item.position === 2 || item.position === 5 ? 'incorrect' : 'correct',
+        score: item.position === 2 || item.position === 5 ? 0 : 100,
       },
     }))
-    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse({
-      ...dailyRecord,
-      exercises: [{
-        ...structuredExercise,
-        status: 'graded',
-        ai_feedback: '整套练习总结',
-        items: gradedItems,
-      }],
-    })))
+    const createdMistake = {
+      id: 9,
+      exercise_id: 2,
+      exercise_item_id: 105,
+      original_question: 'Question 5',
+      user_answer: 'Answer 5',
+      error_content: '先确认适用条件',
+      error_type: 'concept',
+      correct_approach: 'Correct answer 5',
+      cause_analysis: '',
+      status: 'unresolved',
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({
+        ...dailyRecord,
+        exercises: [{
+          ...structuredExercise,
+          status: 'graded',
+          ai_feedback: '整套练习总结',
+          items: gradedItems,
+          mistakes: [{
+            ...createdMistake,
+            id: 8,
+            exercise_item_id: 102,
+            original_question: 'Question 2',
+          }],
+        }],
+      }))
+      .mockImplementationOnce(() => jsonResponse(createdMistake, 201))
+    vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     renderApp(['/daily-records/1'])
@@ -1240,24 +1342,51 @@ describe('App', () => {
     await user.click(await screen.findByRole('button', { name: '展开批改与纠错' }))
     expect(screen.queryByText('整套练习总结')).not.toBeInTheDocument()
     const reviewNavigation = screen.getByRole('navigation', { name: '批改题目导航' })
-    await user.click(within(reviewNavigation).getByRole('button', { name: /第 3 题，错误/ }))
-    expect(screen.getByText('逐题复核 3/12')).toBeInTheDocument()
-    await user.click(screen.getByRole('button', { name: '整理一条错题' }))
+    await user.click(within(reviewNavigation).getByRole('button', { name: /第 5 题，错误/ }))
+    expect(screen.getByText('逐题复核 5/12')).toBeInTheDocument()
+    expect(screen.queryByText(/依据：/)).not.toBeInTheDocument()
+    await user.click(screen.getByRole('button', { name: '整理本题' }))
 
     const mistakeForm = document.querySelector<HTMLFormElement>('form.mistake-form')
-    expect(mistakeForm?.querySelector<HTMLInputElement>('input[name="original_question"]')).toHaveValue('Question 3')
-    expect(within(mistakeForm as HTMLFormElement).getByText('Question 3')).toBeInTheDocument()
+    expect(mistakeForm?.querySelector<HTMLInputElement>('input[name="exercise_item_id"]')).toHaveValue('105')
+    expect(within(mistakeForm as HTMLFormElement).getByText('Question 5')).toBeInTheDocument()
+    expect(within(mistakeForm as HTMLFormElement).getByText('Correct answer 5')).toBeInTheDocument()
+    expect(within(mistakeForm as HTMLFormElement).queryByText(/原始作答/)).not.toBeInTheDocument()
+    const questionTitleIds = Array.from(document.querySelectorAll('[id^="mistake-question-title-"]')).map((element) => element.id)
+    const answerTitleIds = Array.from(document.querySelectorAll('[id^="mistake-answer-title-"]')).map((element) => element.id)
+    expect(questionTitleIds).toHaveLength(2)
+    expect(answerTitleIds).toHaveLength(2)
+    expect(new Set(questionTitleIds).size).toBe(questionTitleIds.length)
+    expect(new Set(answerTitleIds).size).toBe(answerTitleIds.length)
+    await user.type(within(mistakeForm as HTMLFormElement).getByLabelText(/注意点/), '先确认适用条件')
+    await user.click(within(mistakeForm as HTMLFormElement).getByRole('button', { name: '保存错题' }))
+
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/exercises/2/mistakes', expect.objectContaining({
+      method: 'POST',
+      body: JSON.stringify({
+        exercise_item_id: 105,
+        error_content: '先确认适用条件',
+        error_type: 'concept',
+      }),
+    }))
   })
 
   it('requires confirmation before discarding a dirty mistake draft', async () => {
-    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse({ ...dailyRecord, exercises: [exercise] })))
+    const gradedItems = structuredExerciseItems.map((item) => ({
+      ...item,
+      response: { ...item.response, verdict: item.position === 1 ? 'incorrect' : 'correct' },
+    }))
+    vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse({
+      ...dailyRecord,
+      exercises: [{ ...structuredExercise, status: 'graded', items: gradedItems }],
+    })))
     const user = userEvent.setup()
 
     renderApp(['/daily-records/1'])
 
     await user.click(await screen.findByRole('button', { name: '展开批改与纠错' }))
-    await user.click(screen.getByRole('button', { name: '整理一条错题' }))
-    const errorContent = screen.getByLabelText(/错误点/)
+    await user.click(screen.getByRole('button', { name: '整理本题' }))
+    const errorContent = screen.getByLabelText(/注意点/)
     await user.type(errorContent, '没有说明条件概率成立条件')
     const mistakeForm = errorContent.closest('form')
     expect(mistakeForm).not.toBeNull()
@@ -1271,7 +1400,7 @@ describe('App', () => {
     dialog = await screen.findByRole('dialog', { name: '放弃错题草稿？' })
     await user.click(within(dialog).getByRole('button', { name: '放弃草稿' }))
 
-    await waitFor(() => expect(screen.queryByLabelText(/错误点/)).not.toBeInTheDocument())
+    await waitFor(() => expect(screen.queryByLabelText(/注意点/)).not.toBeInTheDocument())
     expect(screen.queryByText('1 处内容未保存')).not.toBeInTheDocument()
   })
 
@@ -1335,31 +1464,38 @@ describe('App', () => {
     expect(screen.queryByRole('heading', { name: '设置' })).not.toBeInTheDocument()
   })
 
-  it('generates a fixed prompt and confirms before skipping practice', async () => {
-    const interaction = {
+  it('generates guided recall questions and confirms before skipping practice', async () => {
+    const guidedReflection = {
       id: 1,
       daily_record_id: 1,
-      kind: 'recall_review',
-      prompt_text: '请评价本次闭卷回忆。',
+      kind: 'recall',
+      questions: [1, 2, 3].map((index) => ({
+        id: `q${index}`,
+        question_markdown: `定向问题 ${index}`,
+        focus: `检查点 ${index}`,
+      })),
+      answers: {},
       feedback_text: '',
     }
+    const recordWithRecall = { ...dailyRecord, recall_last_learned: '条件概率的已有理解' }
     const fetchMock = vi.fn()
-      .mockImplementationOnce(() => jsonResponse(dailyRecord))
-      .mockImplementationOnce(() => jsonResponse(interaction, 201))
+      .mockImplementationOnce(() => jsonResponse(recordWithRecall))
+      .mockImplementationOnce(() => jsonResponse(recordWithRecall))
+      .mockImplementationOnce(() => jsonResponse(guidedReflection))
       .mockImplementationOnce(() => jsonResponse({ ...workflowNodes[3], status: 'skipped' }))
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     renderApp(['/daily-records/1'])
 
-    await user.click(await screen.findByRole('button', { name: '评阅回顾' }))
-    expect(await screen.findByDisplayValue('请评价本次闭卷回忆。')).toBeInTheDocument()
-    expect(screen.queryByText('提示词已生成')).not.toBeInTheDocument()
+    await user.click(await screen.findByRole('button', { name: '保存并生成 3 个问题' }))
+    expect(await screen.findByText('定向问题 1')).toBeInTheDocument()
+    expect(screen.getAllByRole('textbox', { name: /问题 \d 的回答/ })).toHaveLength(3)
 
     await user.click(screen.getByRole('button', { name: '展开练习与推导' }))
     await user.click(screen.getByRole('button', { name: '跳过' }))
     const dialog = await screen.findByRole('dialog', { name: '跳过练习与推导？' })
-    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(fetchMock).toHaveBeenCalledTimes(3)
     await user.click(within(dialog).getByRole('button', { name: '确认跳过' }))
 
     expect(await screen.findByText('练习节点已跳过')).toBeInTheDocument()
@@ -1367,6 +1503,119 @@ describe('App', () => {
       '/api/workflow-nodes/4?confirm_skip=true',
       expect.objectContaining({ method: 'PATCH', body: JSON.stringify({ status: 'skipped' }) }),
     )
+  })
+
+  it('saves three guided answers and renders the combined review', async () => {
+    const reflection = {
+      id: 7,
+      daily_record_id: 1,
+      kind: 'recall',
+      questions: [1, 2, 3].map((index) => ({
+        id: `q${index}`,
+        question_markdown: `回顾问题 ${index}`,
+        focus: `检查点 ${index}`,
+      })),
+      answers: {},
+      reviews: [],
+      feedback_text: '',
+    }
+    const answers = { q1: '回答一', q2: '回答二', q3: '回答三' }
+    const reviewed = {
+      ...reflection,
+      answers,
+      reviews: [
+        { id: 'q1', verdict: 'correct', feedback_markdown: '第一题判断准确。' },
+        { id: 'q2', verdict: 'partial', feedback_markdown: '第二题还需补充边界条件。' },
+        { id: 'q3', verdict: 'incorrect', feedback_markdown: '第三题需要重新区分概念。' },
+      ],
+      feedback_text: '概念关系准确，继续核对边界条件。',
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({
+        ...dailyRecord,
+        recall_last_learned: '我记得条件概率会缩小样本空间。',
+        guided_reflections: [reflection],
+      }))
+      .mockImplementationOnce(() => jsonResponse({ ...reflection, answers }))
+      .mockImplementationOnce(() => jsonResponse(reviewed))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    for (const [index, answer] of ['回答一', '回答二', '回答三'].entries()) {
+      await user.type(await screen.findByRole('textbox', { name: `问题 ${index + 1} 的回答` }), answer)
+    }
+    await user.click(screen.getByRole('button', { name: '保存并获取反馈' }))
+
+    expect(await screen.findByText('概念关系准确，继续核对边界条件。')).toBeInTheDocument()
+    expect(screen.getByText('第一题判断准确。')).toBeInTheDocument()
+    expect(screen.getByText('部分正确')).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '完成闭卷回顾' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      2,
+      '/api/guided-reflections/7/answers',
+      expect.objectContaining({ method: 'PUT', body: JSON.stringify({ answers }) }),
+    )
+    expect(fetchMock).toHaveBeenNthCalledWith(
+      3,
+      '/api/guided-reflections/7/review',
+      expect.objectContaining({ method: 'POST' }),
+    )
+  })
+
+  it('keeps unrelated practice controls available while a reflection review is running', async () => {
+    const reflection = {
+      id: 7,
+      daily_record_id: 1,
+      kind: 'recall',
+      questions: [1, 2, 3].map((index) => ({
+        id: `q${index}`,
+        question_markdown: `回顾问题 ${index}`,
+        focus: `检查点 ${index}`,
+      })),
+      answers: {},
+      reviews: [],
+      feedback_text: '',
+    }
+    const answers = { q1: '回答一', q2: '回答二', q3: '回答三' }
+    let resolveReview!: (response: Awaited<ReturnType<typeof jsonResponse>>) => void
+    const pendingReview = new Promise<Awaited<ReturnType<typeof jsonResponse>>>((resolve) => {
+      resolveReview = resolve
+    })
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({
+        ...dailyRecord,
+        recall_last_learned: '自由回忆',
+        guided_reflections: [reflection],
+        exercises: [structuredExercise],
+      }))
+      .mockImplementationOnce(() => jsonResponse({ ...reflection, answers }))
+      .mockImplementationOnce(() => pendingReview)
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    for (const [index, answer] of Object.values(answers).entries()) {
+      await user.type(await screen.findByRole('textbox', { name: `问题 ${index + 1} 的回答` }), answer)
+    }
+    await user.click(screen.getByRole('button', { name: '保存并获取反馈' }))
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+
+    await user.click(screen.getByRole('button', { name: '展开练习与推导' }))
+    expect(screen.getByRole('button', { name: '下一题' })).toBeEnabled()
+    expect(screen.getByRole('button', { name: '生成新一组练习' })).toBeEnabled()
+    await user.click(screen.getByRole('button', { name: '下一题' }))
+    expect(screen.getByText('Question 2')).toBeInTheDocument()
+
+    resolveReview(await jsonResponse({
+      ...reflection,
+      answers,
+      reviews: [],
+      feedback_text: '检查完成。',
+    }))
+    expect(await screen.findByText('检查完成。')).toBeInTheDocument()
   })
 
   it('offers to skip when an unfinished practice has no completed fields', async () => {
@@ -1397,56 +1646,41 @@ describe('App', () => {
     )
   })
 
-  it('saves three handoff questions in the daily close node', async () => {
+  it('shows previous handoff and generated next-review questions as read-only', async () => {
     const previewQuestionSet = {
       id: 1,
       daily_record_id: 1,
       prompt_text: '请生成恰好 3 条明日预习问题。',
-      question_1: '',
-      question_2: '',
-      question_3: '',
-    }
-    const recordWithPreviousQuestions = {
-      ...dailyRecord,
-      previous_preview_questions: {
-        study_date: '2026-07-13',
-        questions: ['先理解哪个条件？', '这个公式如何推导？', '可以用于什么问题？'],
-      },
-    }
-    const savedQuestions = {
-      ...previewQuestionSet,
       question_1: '条件是什么？',
       question_2: '如何推导？',
       question_3: '怎样应用？',
     }
+    const recordWithPreviousQuestions = {
+      ...dailyRecord,
+      previous_preview_questions: {
+        daily_record_id: 9,
+        section_id: 8,
+        section_title: '上一小节',
+        study_date: '2026-07-13',
+        questions: ['先理解哪个条件？', '这个公式如何推导？', '可以用于什么问题？'],
+      },
+    }
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => jsonResponse(recordWithPreviousQuestions))
       .mockImplementationOnce(() => jsonResponse(previewQuestionSet))
-      .mockImplementationOnce(() => jsonResponse(savedQuestions))
     vi.stubGlobal('fetch', fetchMock)
     const user = userEvent.setup()
 
     renderApp(['/daily-records/1'])
 
     expect(await screen.findByText('先理解哪个条件？')).toBeInTheDocument()
+    expect(screen.getByText('2026-07-13 · 上一小节')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '展开今日收尾' }))
-    await user.click(screen.getByRole('button', { name: '生成预习问题' }))
+    await user.click(screen.getByRole('button', { name: '生成下次回顾问题' }))
     expect(await screen.findByDisplayValue('请生成恰好 3 条明日预习问题。')).toBeInTheDocument()
-    expect(screen.queryByText('提示词已生成')).not.toBeInTheDocument()
-    await user.type(screen.getByLabelText('问题一'), savedQuestions.question_1)
-    await user.type(screen.getByLabelText('问题二'), savedQuestions.question_2)
-    await user.type(screen.getByLabelText('问题三'), savedQuestions.question_3)
-    await user.click(screen.getByRole('button', { name: '保存 3 条问题' }))
-
-    expect(await screen.findByText('3 条衔接问题已保存')).toBeInTheDocument()
-    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/daily-records/1/preview-questions', expect.objectContaining({
-      method: 'PUT',
-      body: JSON.stringify({
-        question_1: savedQuestions.question_1,
-        question_2: savedQuestions.question_2,
-        question_3: savedQuestions.question_3,
-      }),
-    }))
+    expect(screen.getByText('条件是什么？')).toBeInTheDocument()
+    expect(screen.queryByRole('textbox', { name: '问题一' })).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
   })
 
   it('shows a reconnect action beside preview generation failures', async () => {
@@ -1461,7 +1695,7 @@ describe('App', () => {
     renderApp(['/daily-records/1'])
 
     await user.click(await screen.findByRole('button', { name: '展开今日收尾' }))
-    await user.click(screen.getByRole('button', { name: '生成预习问题' }))
+    await user.click(screen.getByRole('button', { name: '生成下次回顾问题' }))
 
     const alert = await screen.findByRole('alert')
     expect(alert).toHaveTextContent('Codex 登录已失效')
@@ -1496,21 +1730,22 @@ describe('App', () => {
     renderApp(['/daily-records/1'])
 
     await user.click(await screen.findByRole('button', { name: '展开今日收尾' }))
-    expect(screen.getByLabelText('问题一')).toHaveValue('旧问题一')
+    expect(screen.getByText('旧问题一')).toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '重新生成问题' }))
 
-    expect(await screen.findByLabelText('问题一')).toHaveValue('新问题一')
-    expect(screen.getByRole('status')).toHaveTextContent('预习问题已生成')
+    expect(await screen.findByText('新问题一')).toBeInTheDocument()
+    expect(screen.queryByText('旧问题一')).not.toBeInTheDocument()
+    expect(screen.getByRole('status')).toHaveTextContent('下次回顾问题已生成')
   })
 
-  it('keeps incomplete preview questions pending for later', async () => {
+  it('clears successful AI generation feedback after three seconds', async () => {
     const previewQuestionSet = {
       id: 1,
       daily_record_id: 1,
       prompt_text: '请生成恰好 3 条明日预习问题。',
-      question_1: '',
-      question_2: '',
-      question_3: '',
+      question_1: '先确认哪些条件？',
+      question_2: '核心推导是什么？',
+      question_3: '如何检查适用范围？',
     }
     const fetchMock = vi.fn()
       .mockImplementationOnce(() => jsonResponse(dailyRecord))
@@ -1521,17 +1756,13 @@ describe('App', () => {
     renderApp(['/daily-records/1'])
 
     await user.click(await screen.findByRole('button', { name: '展开今日收尾' }))
-    await user.click(screen.getByRole('button', { name: '生成预习问题' }))
-    await user.type(await screen.findByLabelText('问题一'), '先确认哪些条件？')
-    const questionForm = screen.getByLabelText('问题一').closest('form')
-    expect(questionForm).not.toBeNull()
-    await user.click(within(questionForm as HTMLFormElement).getByRole('button', { name: '保存 3 条问题' }))
-
-    expect(await screen.findByRole('alert')).toHaveTextContent('请先完成：问题二、问题三')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-    expect(screen.getByRole('button', { name: '收起今日收尾' })).toHaveAttribute('aria-expanded', 'true')
-    expect(fetchMock).toHaveBeenCalledTimes(2)
-  })
+    await user.click(screen.getByRole('button', { name: '生成下次回顾问题' }))
+    expect(await screen.findByRole('status')).toHaveTextContent('下次回顾问题已生成')
+    await waitFor(
+      () => expect(screen.queryByText('下次回顾问题已生成')).not.toBeInTheDocument(),
+      { timeout: 4000 },
+    )
+  }, 8000)
 
   it('asks before ending today while workflow nodes are unfinished', async () => {
     const completedRecord = {
@@ -1659,7 +1890,7 @@ describe('App', () => {
         return jsonResponse({
           obsidian_vault_path: '',
           learner_profile: '',
-          service_version: '0.1.2',
+          service_version: '0.1.3',
           desktop_launch: true,
         })
       }
@@ -2257,7 +2488,8 @@ $$`)
         chapter_title: '第一章',
         section_id: 1,
         section_title: '条件概率',
-        original_question: '何时可以使用贝叶斯公式？',
+        exercise_item_id: 101,
+        original_question: String.raw`何时可以使用贝叶斯公式？当 $P(B)>0$ 时说明理由。`,
         user_answer: '任何条件下。',
         error_content: '忽略分母条件。',
         error_type: 'formula_condition',
@@ -2276,6 +2508,7 @@ $$`)
         chapter_title: '第一章',
         section_id: 2,
         section_title: '全概率公式',
+        exercise_item_id: null,
         original_question: '计算分组概率。',
         user_answer: '计算结果。',
         error_content: '加法计算错误。',
@@ -2307,14 +2540,23 @@ $$`)
     vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse(mistakeIndex)))
     const user = userEvent.setup()
 
-    renderApp(['/mistakes'])
+    const { container } = renderApp(['/mistakes'])
 
     expect(await screen.findByRole('heading', { name: '错题与薄弱点' })).toBeInTheDocument()
     expect(screen.getByRole('link', { name: '错题' })).toHaveClass('active')
-    expect(screen.getByText('何时可以使用贝叶斯公式？')).toBeInTheDocument()
-    expect(screen.getByText('计算分组概率。')).toBeInTheDocument()
+    const firstQuestion = container.querySelector<HTMLElement>('.index-record__title')
+    expect(firstQuestion).toHaveTextContent('何时可以使用贝叶斯公式')
+    expect(container.querySelector('.index-record__title .katex')).toBeInTheDocument()
+    await user.click(firstQuestion?.closest('summary') as HTMLElement)
+    expect(container.querySelector('.mistake-question-card .katex')).toBeInTheDocument()
+    expect(screen.getAllByText('计算分组概率。').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('正确作答').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('我的注意点').length).toBeGreaterThan(0)
+    expect(screen.getByText('旧版记录')).toBeInTheDocument()
+    expect(screen.queryByText('为什么错')).not.toBeInTheDocument()
+    expect(screen.queryByText('任何条件下。')).not.toBeInTheDocument()
     await user.selectOptions(screen.getByLabelText('解决状态'), 'unresolved')
-    expect(screen.getByText('何时可以使用贝叶斯公式？')).toBeInTheDocument()
+    expect(screen.getAllByText(/何时可以使用贝叶斯公式/).length).toBeGreaterThan(0)
     expect(screen.queryByText('计算分组概率。')).not.toBeInTheDocument()
     expect(screen.getByText('1 条')).toBeInTheDocument()
   })
@@ -2509,8 +2751,8 @@ $$`)
     renderApp(['/settings'])
 
     expect(await screen.findByRole('heading', { name: '设置' })).toBeInTheDocument()
-    expect(screen.getByText('Markdown 导出')).toBeInTheDocument()
-    expect(screen.getByText('选择课程和内容，导出 Markdown 文件。')).toBeInTheDocument()
+    expect(screen.getByText('内容导出（Markdown）')).toBeInTheDocument()
+    expect(screen.getByText(/不能用来恢复 Lumina 的完整使用状态/)).toBeInTheDocument()
     expect(screen.queryByText('分层 Markdown 文件')).not.toBeInTheDocument()
     await user.click(screen.getByRole('button', { name: '选择并导出' }))
     const dialog = await screen.findByRole('dialog', { name: '导出 Markdown' })
@@ -2520,6 +2762,55 @@ $$`)
     expect(within(dialog).getByText('已选择 2 门课程，5 类内容')).toBeInTheDocument()
     await user.click(within(dialog).getByLabelText('线性代数'))
     expect(within(dialog).getByText('已选择 1 门课程，5 类内容')).toBeInTheDocument()
+  })
+
+  it('validates a full backup before enabling restore', async () => {
+    const backupPreview = {
+      token: 'a'.repeat(32),
+      created_at: '2026-08-08T12:00:00',
+      format_version: 2,
+      file_count: 8,
+      total_size_bytes: 3 * 1024 * 1024,
+      includes_materials: true,
+      includes_attachments: true,
+      includes_notes: true,
+      requires_obsidian_vault: true,
+    }
+    const fetchMock = vi.fn().mockImplementation((input: string, init?: RequestInit) => {
+      if (input === '/api/settings') return jsonResponse({ obsidian_vault_path: 'D:\\Notes', desktop_launch: true })
+      if (input === '/api/settings/obsidian-vaults') return jsonResponse({ vaults: [], browse_supported: true })
+      if (input === '/api/ai/provider-snapshot') return jsonResponse(providerSnapshot())
+      if (input === '/api/backup/inspect' && init?.method === 'POST') return jsonResponse(backupPreview)
+      if (input === `/api/backup/staged/${backupPreview.token}` && init?.method === 'DELETE') {
+        return new Response(null, { status: 204 })
+      }
+      throw new Error(`Unexpected request: ${input}`)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/settings'])
+
+    expect(await screen.findByRole('heading', { name: '备份与恢复' })).toBeInTheDocument()
+    expect(screen.getByText(/作答附件和 Lumina 管理的 Obsidian 笔记/)).toBeInTheDocument()
+    const input = screen.getByText('导入备份').closest('label')?.querySelector('input[type="file"]')
+    expect(input).toBeInstanceOf(HTMLInputElement)
+    await user.upload(input as HTMLInputElement, new File(['backup'], 'lumina-backup.zip', { type: 'application/zip' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '确认恢复备份' })
+    expect(within(dialog).getByText('8 个文件 · 3 MB')).toBeInTheDocument()
+    expect(within(dialog).getByText('学习数据库、学习材料、作答附件、小节笔记')).toBeInTheDocument()
+    expect(within(dialog).getByLabelText('笔记恢复到')).toHaveValue('D:\\Notes')
+    expect(within(dialog).getByRole('button', { name: '恢复并重启' })).toBeEnabled()
+    expect(fetchMock).toHaveBeenCalledWith(
+      '/api/backup/inspect',
+      expect.objectContaining({ method: 'POST', body: expect.any(FormData) }),
+    )
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(fetchMock).toHaveBeenCalledWith(
+      `/api/backup/staged/${backupPreview.token}`,
+      expect.objectContaining({ method: 'DELETE' }),
+    )
   })
 
   it('opens the material library from settings in a dialog', async () => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useId, useRef, useState } from 'react'
 import type { FormEvent, ReactNode } from 'react'
 import {
   Check,
@@ -8,22 +8,25 @@ import {
   Circle,
   Clipboard,
   FileText,
+  Paperclip,
   Plus,
   Save,
   SkipForward,
   Sparkles,
   Trash2,
+  X,
 } from 'lucide-react'
 import { Link, useLoaderData } from 'react-router-dom'
 import { api } from '../api'
 import type {
-  AiInteractionKind,
   AiRun,
   DailyRecord,
   DailyRecordContent,
   DailyRecordMaterial,
   Exercise,
   ExerciseItem,
+  GuidedReflection,
+  GuidedReflectionKind,
   Mistake,
   MistakePayload,
   MistakeType,
@@ -90,6 +93,95 @@ function FieldLabel({
   )
 }
 
+function GuidedReflectionPanel({
+  reflection,
+  busy,
+  taskState,
+  completeLabel,
+  onSubmit,
+  onRegenerate,
+  onComplete,
+}: {
+  reflection: GuidedReflection
+  busy: boolean
+  taskState: ReactNode
+  completeLabel: string
+  onSubmit: (event: FormEvent<HTMLFormElement>, reflection: GuidedReflection) => void
+  onRegenerate: () => void
+  onComplete: () => void
+}) {
+  const formKey = reflection.questions
+    .map((question) => `${question.id}:${question.question_markdown}`)
+    .join('|')
+  return (
+    <section className="guided-reflection" aria-label="AI 定向问题">
+      <header className="guided-reflection__heading">
+        <div>
+          <strong>AI 定向追问</strong>
+          <span>按顺序回答 3 个具体问题，再获取综合反馈</span>
+        </div>
+        <button className="text-button" type="button" disabled={busy} onClick={onRegenerate}>
+          <Sparkles size={15} />重新生成问题
+        </button>
+      </header>
+      {taskState}
+      <form
+        key={formKey}
+        className="guided-reflection__form"
+        data-dirty-key={`guided-reflection-${reflection.id}`}
+        data-save-kind="guided-reflection"
+        data-entity-id={reflection.id}
+        onSubmit={(event) => onSubmit(event, reflection)}
+      >
+        {reflection.questions.map((question, index) => {
+          const review = (reflection.reviews ?? []).find((item) => item.id === question.id)
+          return (
+          <label className="guided-question" key={question.id}>
+            <span className="guided-question__meta">
+              <strong>问题 {index + 1}</strong>
+              <small>{question.focus}</small>
+            </span>
+            <MarkdownContent content={question.question_markdown} />
+            <textarea
+              name={`answer_${question.id}`}
+              rows={5}
+              defaultValue={reflection.answers[question.id] ?? ''}
+              placeholder="用自己的话回答，写出判断依据或关键步骤"
+              aria-label={`问题 ${index + 1} 的回答`}
+            />
+            {review && (
+              <div className={`guided-question__review guided-question__review--${review.verdict}`}>
+                <strong>{exerciseVerdictLabels[review.verdict] ?? review.verdict}</strong>
+                <MarkdownContent content={review.feedback_markdown} />
+              </div>
+            )}
+          </label>
+          )
+        })}
+        <div className="form-actions">
+          <button className="secondary-button" type="submit" disabled={busy}>
+            <Save size={15} />保存回答
+          </button>
+          <button className="primary-button" type="submit" data-review="true" disabled={busy}>
+            <Sparkles size={15} />保存并获取反馈
+          </button>
+        </div>
+      </form>
+      {((reflection.reviews ?? []).length > 0 || reflection.feedback_text) && (
+        <section className="guided-reflection__feedback">
+          <div><strong>综合反馈</strong><span>上方已逐题标注，下面给出整体建议</span></div>
+          {reflection.feedback_text && <MarkdownContent content={reflection.feedback_text} />}
+          <div className="form-actions">
+            <button className="primary-button" type="button" disabled={busy} onClick={onComplete}>
+              <Check size={15} />{completeLabel}
+            </button>
+          </div>
+        </section>
+      )}
+    </section>
+  )
+}
+
 
 function SourceReferences({
   references,
@@ -147,41 +239,38 @@ function mistakePayload(form: HTMLFormElement): MistakePayload {
   const exerciseItemId = Number(data.get('exercise_item_id'))
   return {
     ...(exerciseItemId > 0 ? { exercise_item_id: exerciseItemId } : {}),
-    original_question: String(data.get('original_question') ?? ''),
-    user_answer: String(data.get('user_answer') ?? ''),
     error_content: String(data.get('error_content') ?? ''),
     error_type: String(data.get('error_type') ?? 'concept') as MistakeType,
-    correct_approach: String(data.get('correct_approach') ?? ''),
-    cause_analysis: String(data.get('cause_analysis') ?? ''),
   }
 }
 
 function MistakeFields({
   mistake,
   exerciseItem,
-  legacyQuestion = '',
-  legacyAnswer = '',
 }: {
   mistake?: Mistake
   exerciseItem?: ExerciseItem
-  legacyQuestion?: string
-  legacyAnswer?: string
 }) {
-  const selectedAnswer = exerciseItem?.response?.selected_options.join('、') ?? ''
-  const originalQuestion = mistake?.original_question ?? exerciseItem?.stem_markdown ?? legacyQuestion
-  const userAnswer = mistake?.user_answer
-    || exerciseItem?.response?.answer_markdown
-    || selectedAnswer
-    || legacyAnswer
+  const fieldId = useId().replaceAll(':', '')
+  const questionTitleId = `mistake-question-title-${fieldId}`
+  const answerTitleId = `mistake-answer-title-${fieldId}`
+  const originalQuestion = mistake?.original_question ?? exerciseItem?.stem_markdown ?? ''
+  const correctAnswer = mistake?.correct_approach ?? exerciseItem?.reference_answer_markdown ?? ''
   return (
     <div className="mistake-fields">
       {exerciseItem && <input type="hidden" name="exercise_item_id" value={exerciseItem.id} />}
-      <div className="mistake-readonly-field"><strong>原题</strong><span>题目内容与练习保持一致</span><MarkdownContent content={originalQuestion || '暂无题目内容'} /><input type="hidden" name="original_question" value={originalQuestion} /></div>
-      <div className="mistake-readonly-field"><strong>原始作答</strong><span>保留整理错题时的答案</span><MarkdownContent content={userAnswer || '未填写'} /><input type="hidden" name="user_answer" value={userAnswer} /></div>
-      <FieldLabel title="错误点" description="具体写清错在哪里"><textarea required name="error_content" rows={3} defaultValue={mistake?.error_content} /></FieldLabel>
-      <FieldLabel title="错误类型" description="选择最接近的原因"><select name="error_type" defaultValue={mistake?.error_type ?? 'concept'}>{Object.entries(mistakeTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FieldLabel>
-      <FieldLabel title="正确思路" description="记录正确的切入点和解题路径"><textarea required name="correct_approach" rows={3} defaultValue={mistake?.correct_approach} /></FieldLabel>
-      <FieldLabel title="原因分析" description="说明为什么会错、哪部分没有理解到位"><textarea required name="cause_analysis" rows={3} defaultValue={mistake?.cause_analysis} /></FieldLabel>
+      <section className="mistake-reference mistake-reference--question" aria-labelledby={questionTitleId}>
+        <div><strong id={questionTitleId}>原题</strong><span>与当前批改题一致</span></div>
+        <MarkdownContent content={originalQuestion || '暂无题目内容'} />
+      </section>
+      <section className="mistake-reference mistake-reference--answer" aria-labelledby={answerTitleId}>
+        <div><strong id={answerTitleId}>正确作答</strong><span>用于对照和复习</span></div>
+        <MarkdownContent content={correctAnswer || '暂无参考答案'} />
+      </section>
+      <div className="mistake-editor-fields">
+        <FieldLabel title="错误类型" description="选择最接近的原因"><select name="error_type" defaultValue={mistake?.error_type ?? 'concept'}>{Object.entries(mistakeTypeLabels).map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></FieldLabel>
+        <FieldLabel title="注意点" description="只记下下次作答时需要特别留意的地方"><textarea required name="error_content" rows={3} defaultValue={mistake?.error_content} /></FieldLabel>
+      </div>
     </div>
   )
 }
@@ -251,15 +340,18 @@ export function DailyRecordPage() {
   const [notice, setNotice] = useTransientNotice()
   const [draftRecovered, setDraftRecovered] = useState(false)
   const [busy, setBusy] = useState(false)
-  const [activeAiTask, setActiveAiTask] = useState<ActiveAiTask | null>(null)
-  const [activeServerRun, setActiveServerRun] = useState<AiRun | null>(
-    routeData.record?.active_ai_runs?.[0] ?? null,
+  const [attachmentBusyItemId, setAttachmentBusyItemId] = useState<number | null>(null)
+  const [activeAiTasks, setActiveAiTasks] = useState<Partial<Record<AiTaskKey, ActiveAiTask>>>({})
+  const [activeServerRuns, setActiveServerRuns] = useState<AiRun[]>(
+    routeData.record?.active_ai_runs ?? [],
   )
-  const [aiTaskFeedback, setAiTaskFeedback] = useState<AiTaskFeedback | null>(null)
+  const [aiTaskFeedbacks, setAiTaskFeedbacks] = useState<
+    Partial<Record<AiTaskKey, AiTaskFeedback & { expiresAt?: number }>>
+  >({})
   const [skipConfirmOpen, setSkipConfirmOpen] = useState(false)
   const [skipError, setSkipError] = useState('')
   const [skipTrigger, setSkipTrigger] = useState<HTMLButtonElement | null>(null)
-  const [newMistakeExerciseId, setNewMistakeExerciseId] = useState<number | null>(null)
+  const [newMistakeItemId, setNewMistakeItemId] = useState<number | null>(null)
   const [activeExerciseItemPosition, setActiveExerciseItemPosition] = useState(1)
   const [activeReviewItemPosition, setActiveReviewItemPosition] = useState(1)
   const [mistakeDraftDiscard, setMistakeDraftDiscard] = useState<MistakeDraftDiscardAction | null>(null)
@@ -277,10 +369,11 @@ export function DailyRecordPage() {
     ? [
         record.id,
         record.ai_interactions.map((item) => item.id).join(','),
+        (record.guided_reflections ?? []).map((item) => `${item.id}:${item.questions.map((question) => question.question_markdown).join('.')}`).join(','),
         record.exercises.map((item) => `${item.id}:${(item.items ?? []).map((question) => question.id).join('.')}:${item.mistakes.map((mistake) => mistake.id).join('.')}`).join(','),
         record.preview_question_set?.id ?? '',
         (record.materials ?? []).map((material) => material.id).join(','),
-        newMistakeExerciseId ?? '',
+        newMistakeItemId ?? '',
       ].join('|')
     : ''
 
@@ -294,10 +387,42 @@ export function DailyRecordPage() {
     setRecord((current) => current ? { ...current, ai_source_refs: latest.ai_source_refs } : current)
   }
 
-  const activeServerRunId = activeServerRun?.id
+  function startAiTask(task: ActiveAiTask) {
+    setActiveAiTasks((current) => ({ ...current, [task.key]: task }))
+    setAiTaskFeedbacks((current) => {
+      const next = { ...current }
+      delete next[task.key]
+      return next
+    })
+  }
+
+  function finishAiTask(key: AiTaskKey) {
+    setActiveAiTasks((current) => {
+      const next = { ...current }
+      delete next[key]
+      return next
+    })
+  }
+
+  function showAiTaskFeedback(feedback: AiTaskFeedback) {
+    setAiTaskFeedbacks((current) => ({
+      ...current,
+      [feedback.key]: {
+        ...feedback,
+        expiresAt: feedback.tone === 'success' ? Date.now() + 3000 : undefined,
+      },
+    }))
+  }
+
+  function isAiTaskActive(key: AiTaskKey) {
+    return Boolean(activeAiTasks[key])
+  }
+
+  const activeAiTaskCount = Object.keys(activeAiTasks).length
+  const activeServerRunIds = activeServerRuns.map((run) => run.id).join(',')
   const recordId = record?.id
   useEffect(() => {
-    if (!recordId || (!activeAiTask && !activeServerRunId)) return
+    if (!recordId || (activeAiTaskCount === 0 && !activeServerRunIds)) return
     let disposed = false
     let timer = 0
     const controller = new AbortController()
@@ -309,31 +434,51 @@ export function DailyRecordPage() {
           controller.signal,
         )
         if (disposed) return
-        setActiveServerRun(runs[0] ?? null)
-        if (runs.length > 0 || activeAiTask) timer = window.setTimeout(poll, 1500)
+        setActiveServerRuns(runs)
+        if (runs.length > 0 || activeAiTaskCount > 0) timer = window.setTimeout(poll, 1500)
       } catch {
-        if (!disposed && (activeServerRunId || activeAiTask)) timer = window.setTimeout(poll, 5000)
+        if (!disposed && (activeServerRunIds || activeAiTaskCount > 0)) {
+          timer = window.setTimeout(poll, 5000)
+        }
       }
     }
-    timer = window.setTimeout(poll, activeAiTask ? 500 : 1500)
+    timer = window.setTimeout(poll, activeAiTaskCount > 0 ? 500 : 1500)
     return () => {
       disposed = true
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [recordId, activeAiTask, activeServerRunId])
+  }, [recordId, activeAiTaskCount, activeServerRunIds])
 
-  async function cancelActiveAiTask() {
-    if (!activeServerRun) return
+  async function cancelActiveAiTask(run: AiRun) {
     try {
-      await api.cancelAiRun(activeServerRun.id)
-      setActiveServerRun(null)
-      setActiveAiTask(null)
+      await api.cancelAiRun(run.id)
+      setActiveServerRuns((current) => current.filter((item) => item.id !== run.id))
+      const taskKey = (Object.keys(aiTaskRunKeys) as AiTaskKey[])
+        .find((key) => aiTaskRunKeys[key] === run.task)
+      if (taskKey) finishAiTask(taskKey)
       setNotice('生成任务已取消，可以从原操作重新生成')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '取消生成失败')
     }
   }
+
+  useEffect(() => {
+    const timers = Object.entries(aiTaskFeedbacks).flatMap(([key, feedback]) => {
+      if (!feedback?.expiresAt) return []
+      const delay = Math.max(0, feedback.expiresAt - Date.now())
+      return [window.setTimeout(() => {
+        setAiTaskFeedbacks((current) => {
+          const currentFeedback = current[key as AiTaskKey]
+          if (currentFeedback?.expiresAt !== feedback.expiresAt) return current
+          const next = { ...current }
+          delete next[key as AiTaskKey]
+          return next
+        })
+      }, delay)]
+    })
+    return () => timers.forEach((timer) => window.clearTimeout(timer))
+  }, [aiTaskFeedbacks])
 
   useEffect(() => {
     if (!record || !pageRef.current) return
@@ -393,28 +538,28 @@ export function DailyRecordPage() {
     })
   }
 
-  function requestMistakeDraftState(nextExerciseId: number | null, trigger: HTMLButtonElement) {
-    if (newMistakeExerciseId === null) {
-      setNewMistakeExerciseId(nextExerciseId)
+  function requestMistakeDraftState(nextItemId: number | null, trigger: HTMLButtonElement) {
+    if (newMistakeItemId === null) {
+      setNewMistakeItemId(nextItemId)
       return
     }
-    const currentKey = `mistake-new-${newMistakeExerciseId}`
+    const currentKey = `mistake-new-${newMistakeItemId}`
     if (dirtyFormKeys.has(currentKey)) {
       setMistakeDraftDiscard({
-        currentExerciseId: newMistakeExerciseId,
-        nextExerciseId,
+        currentItemId: newMistakeItemId,
+        nextItemId,
         trigger,
       })
       return
     }
     clearDirtyFormKey(currentKey)
-    setNewMistakeExerciseId(nextExerciseId)
+    setNewMistakeItemId(nextItemId)
   }
 
   function discardMistakeDraft() {
     if (!mistakeDraftDiscard) return
-    clearDirtyFormKey(`mistake-new-${mistakeDraftDiscard.currentExerciseId}`)
-    setNewMistakeExerciseId(mistakeDraftDiscard.nextExerciseId)
+    clearDirtyFormKey(`mistake-new-${mistakeDraftDiscard.currentItemId}`)
+    setNewMistakeItemId(mistakeDraftDiscard.nextItemId)
     setMistakeDraftDiscard(null)
   }
 
@@ -435,6 +580,17 @@ export function DailyRecordPage() {
       case 'interaction':
         await api.updateAiInteraction(id, String(data.get('feedback_text') ?? ''))
         return
+      case 'guided-reflection': {
+        const reflection = (record.guided_reflections ?? []).find((item) => item.id === id)
+        if (!reflection) throw new Error('定向问题记录不存在')
+        await api.updateGuidedReflectionAnswers(id, Object.fromEntries(
+          reflection.questions.map((question) => [
+            question.id,
+            String(data.get(`answer_${question.id}`) ?? ''),
+          ]),
+        ))
+        return
+      }
       case 'exercise':
         await api.updateExercise(id, {
           ai_questions: String(data.get('ai_questions') ?? ''),
@@ -455,13 +611,6 @@ export function DailyRecordPage() {
         return
       case 'mistake-update':
         await api.updateMistake(id, mistakePayload(form))
-        return
-      case 'preview':
-        await api.savePreviewQuestions(record.id, {
-          question_1: String(data.get('question_1') ?? ''),
-          question_2: String(data.get('question_2') ?? ''),
-          question_3: String(data.get('question_3') ?? ''),
-        })
         return
       case 'materials': {
         let updated = record
@@ -659,50 +808,121 @@ export function DailyRecordPage() {
     }
   }
 
-  async function generateInteraction(kind: AiInteractionKind) {
+  function replaceGuidedReflection(updated: GuidedReflection) {
+    setRecord((current) => current ? {
+      ...current,
+      guided_reflections: [
+        ...(current.guided_reflections ?? []).filter((item) => item.id !== updated.id),
+        updated,
+      ],
+    } : current)
+  }
+
+  async function generateGuidedQuestions(kind: GuidedReflectionKind) {
     if (!record) return
-    setBusy(true)
-    setActiveAiTask({
-      key: kind,
-      label: kind === 'recall_review' ? '正在评阅闭卷回顾' : '正在检查主动重构',
+    const taskKey = kind === 'recall' ? 'recall_questions' : 'reconstruction_questions'
+    startAiTask({
+      key: taskKey,
+      label: kind === 'recall' ? '正在生成回顾问题' : '正在生成重构问题',
     })
-    setAiTaskFeedback(null)
     setError('')
     setNotice('')
     try {
-      const interaction = await api.generateAiReview(record.id, kind)
-      setRecord({ ...record, ai_interactions: [...record.ai_interactions, interaction] })
+      const existing = (record.guided_reflections ?? []).find((item) => item.kind === kind)
+      if (existing) clearDirtyFormKey(`guided-reflection-${existing.id}`)
+      replaceGuidedReflection(await api.generateGuidedReflectionQuestions(record.id, kind))
       await refreshSourceReferences()
-      setAiTaskFeedback({ key: kind, message: '评阅结果已生成', tone: 'success' })
+      showAiTaskFeedback({ key: taskKey, message: '3 个定向问题已生成', tone: 'success' })
     } catch (requestError) {
-      setAiTaskFeedback({
-        key: kind,
-        message: requestError instanceof Error ? requestError.message : '评阅失败',
+      showAiTaskFeedback({
+        key: taskKey,
+        message: requestError instanceof Error ? requestError.message : '生成定向问题失败',
         tone: 'error',
       })
     } finally {
-      setActiveAiTask(null)
-      setBusy(false)
+      finishAiTask(taskKey)
     }
   }
 
-  async function saveInteractionFeedback(
+  async function regenerateGuidedQuestions(
+    kind: GuidedReflectionKind,
+    nodeKey: 'recall' | 'reconstruct',
+  ) {
+    const seedForm = document.querySelector<HTMLFormElement>(
+      `form[data-dirty-key="content-${nodeKey}"]`,
+    )
+    if (seedForm && formIsDirty(seedForm) && await persistContent(seedForm, nodeKey, false)) {
+      return
+    }
+    await generateGuidedQuestions(kind)
+  }
+
+  async function saveReflectionSeed(
     event: FormEvent<HTMLFormElement>,
-    interactionId: number,
+    nodeKey: 'recall' | 'reconstruct',
+    kind: GuidedReflectionKind,
   ) {
     event.preventDefault()
-    if (!record) return
     const form = event.currentTarget
-    const feedback = String(new FormData(form).get('feedback_text') ?? '')
-    const updated = await api.updateAiInteraction(interactionId, feedback)
-    setRecord({
-      ...record,
-      ai_interactions: record.ai_interactions.map((item) =>
-        item.id === updated.id ? updated : item
-      ),
-    })
-    markFormSaved(form)
-    setNotice('反馈已保存')
+    const submitter = (event.nativeEvent as SubmitEvent).submitter as HTMLElement | null
+    if (submitter?.dataset.generate === 'true') {
+      if (await persistContent(form, nodeKey, false)) return
+      await generateGuidedQuestions(kind)
+      return
+    }
+    const complete = submitter?.dataset.complete === 'true'
+    if (
+      complete
+      && requestIncompleteCompletion(
+        form,
+        submitter,
+        completionFields[nodeKey],
+        () => persistContent(form, nodeKey, true),
+      )
+    ) return
+    await persistContent(form, nodeKey, complete)
+  }
+
+  async function saveGuidedReflection(
+    event: FormEvent<HTMLFormElement>,
+    reflection: GuidedReflection,
+  ) {
+    event.preventDefault()
+    const form = event.currentTarget
+    const shouldReview = (
+      (event.nativeEvent as SubmitEvent).submitter as HTMLElement | null
+    )?.dataset.review === 'true'
+    const answers = Object.fromEntries(reflection.questions.map((question) => [
+      question.id,
+      String(new FormData(form).get(`answer_${question.id}`) ?? ''),
+    ]))
+    const reviewTask = reflection.kind === 'recall' ? 'recall_review' : 'reconstruction_review'
+    setError('')
+    try {
+      setBusy(true)
+      const saved = await api.updateGuidedReflectionAnswers(reflection.id, answers)
+      replaceGuidedReflection(saved)
+      markFormSaved(form)
+      setBusy(false)
+      if (!shouldReview) {
+        setNotice('3 个回答已保存')
+        return
+      }
+      startAiTask({
+        key: reviewTask,
+        label: reflection.kind === 'recall' ? '正在逐题评阅闭卷回顾' : '正在逐题检查主动重构',
+      })
+      replaceGuidedReflection(await api.reviewGuidedReflection(reflection.id))
+      await refreshSourceReferences()
+      showAiTaskFeedback({ key: reviewTask, message: '逐题反馈已生成', tone: 'success' })
+    } catch (requestError) {
+      const message = requestError instanceof Error ? requestError.message : '保存定向回答失败'
+      setError(message)
+      if (shouldReview) showAiTaskFeedback({ key: reviewTask, message, tone: 'error' })
+    } finally {
+      if (shouldReview) finishAiTask(reviewTask)
+      setBusy(false)
+    }
   }
 
   async function copyText(text: string) {
@@ -712,26 +932,26 @@ export function DailyRecordPage() {
 
   async function createExercise() {
     if (!record) return
-    setBusy(true)
-    setActiveAiTask({ key: 'practice', label: '正在生成练习题' })
-    setAiTaskFeedback(null)
+    startAiTask({ key: 'practice', label: '正在生成练习题' })
     setError('')
     setNotice('')
     try {
       const exercise = await api.generateAiPractice(record.id)
-      setRecord({ ...record, exercises: [...record.exercises, exercise] })
+      setRecord((current) => current ? {
+        ...current,
+        exercises: [...current.exercises, exercise],
+      } : current)
       setActiveExerciseItemPosition(1)
       await refreshSourceReferences()
-      setAiTaskFeedback({ key: 'practice', message: '练习题已生成', tone: 'success' })
+      showAiTaskFeedback({ key: 'practice', message: '练习题已生成', tone: 'success' })
     } catch (requestError) {
-      setAiTaskFeedback({
+      showAiTaskFeedback({
         key: 'practice',
         message: requestError instanceof Error ? requestError.message : '生成练习题失败',
         tone: 'error',
       })
     } finally {
-      setActiveAiTask(null)
-      setBusy(false)
+      finishAiTask('practice')
     }
   }
 
@@ -759,11 +979,10 @@ export function DailyRecordPage() {
   }
 
   function replaceExercise(updated: Exercise) {
-    if (!record) return
-    setRecord({
-      ...record,
-      exercises: record.exercises.map((item) => item.id === updated.id ? updated : item),
-    })
+    setRecord((current) => current ? {
+      ...current,
+      exercises: current.exercises.map((item) => item.id === updated.id ? updated : item),
+    } : current)
   }
 
   async function persistExerciseResponse(form: HTMLFormElement, itemId: number) {
@@ -789,6 +1008,32 @@ export function DailyRecordPage() {
   async function saveStructuredResponse(event: FormEvent<HTMLFormElement>, itemId: number) {
     event.preventDefault()
     await persistExerciseResponse(event.currentTarget, itemId)
+  }
+
+  async function uploadExerciseAttachment(itemId: number, file: File) {
+    setAttachmentBusyItemId(itemId)
+    setError('')
+    try {
+      replaceExercise(await api.uploadExerciseResponseAttachment(itemId, file))
+      setNotice('作答附件已添加')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '上传作答附件失败')
+    } finally {
+      setAttachmentBusyItemId(null)
+    }
+  }
+
+  async function deleteExerciseAttachment(itemId: number, attachmentId: number) {
+    setAttachmentBusyItemId(itemId)
+    setError('')
+    try {
+      replaceExercise(await api.deleteExerciseResponseAttachment(attachmentId))
+      setNotice('作答附件已移除')
+    } catch (requestError) {
+      setError(requestError instanceof Error ? requestError.message : '移除作答附件失败')
+    } finally {
+      setAttachmentBusyItemId(null)
+    }
   }
 
   async function moveExerciseItem(nextPosition: number, itemId: number) {
@@ -893,9 +1138,7 @@ export function DailyRecordPage() {
   }
 
   async function createGradingPrompt(exerciseId: number) {
-    setBusy(true)
-    setActiveAiTask({ key: 'grading', label: '正在批改练习答案' })
-    setAiTaskFeedback(null)
+    startAiTask({ key: 'grading', label: '正在批改练习答案' })
     setError('')
     try {
       setNotice('')
@@ -909,16 +1152,15 @@ export function DailyRecordPage() {
         setActiveReviewItemPosition(firstNeedsReview?.position ?? 1)
         revealNode(latestRecord, 'review')
       }
-      setAiTaskFeedback({ key: 'grading', message: '批改结果已生成', tone: 'success' })
+      showAiTaskFeedback({ key: 'grading', message: '批改结果已生成', tone: 'success' })
     } catch (requestError) {
-      setAiTaskFeedback({
+      showAiTaskFeedback({
         key: 'grading',
         message: requestError instanceof Error ? requestError.message : '批改失败',
         tone: 'error',
       })
     } finally {
-      setActiveAiTask(null)
-      setBusy(false)
+      finishAiTask('grading')
     }
   }
 
@@ -1015,7 +1257,7 @@ export function DailyRecordPage() {
         ),
       })
       markFormSaved(form)
-      setNewMistakeExerciseId(null)
+      setNewMistakeItemId(null)
       setNotice('错题已保存')
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '保存错题失败')
@@ -1082,66 +1324,27 @@ export function DailyRecordPage() {
 
   async function generatePreviewPrompt() {
     if (!record) return
-    setBusy(true)
-    setActiveAiTask({ key: 'preview_questions', label: '正在生成预习问题' })
-    setAiTaskFeedback(null)
+    startAiTask({ key: 'preview_questions', label: '正在生成下次回顾问题' })
     setError('')
     setNotice('')
     try {
       const previewQuestionSet = await api.generateAiPreviewQuestions(record.id)
-      setRecord({ ...record, preview_question_set: previewQuestionSet })
+      setRecord((current) => current ? { ...current, preview_question_set: previewQuestionSet } : current)
       await refreshSourceReferences()
-      setAiTaskFeedback({
+      showAiTaskFeedback({
         key: 'preview_questions',
-        message: '预习问题已生成',
+        message: '下次回顾问题已生成',
         tone: 'success',
       })
     } catch (requestError) {
-      setAiTaskFeedback({
+      showAiTaskFeedback({
         key: 'preview_questions',
-        message: requestError instanceof Error ? requestError.message : '生成预习问题失败',
+        message: requestError instanceof Error ? requestError.message : '生成下次回顾问题失败',
         tone: 'error',
       })
     } finally {
-      setActiveAiTask(null)
-      setBusy(false)
+      finishAiTask('preview_questions')
     }
-  }
-
-  async function persistPreviewQuestions(form: HTMLFormElement) {
-    if (!record) return '当前学习记录不可保存'
-    const data = new FormData(form)
-    setBusy(true)
-    setError('')
-    try {
-      const previewQuestionSet = await api.savePreviewQuestions(record.id, {
-        question_1: String(data.get('question_1') ?? ''),
-        question_2: String(data.get('question_2') ?? ''),
-        question_3: String(data.get('question_3') ?? ''),
-      })
-      const updatedRecord = { ...record, preview_question_set: previewQuestionSet }
-      setRecord(updatedRecord)
-      markFormSaved(form)
-      setNotice('3 条衔接问题已保存')
-      return null
-    } catch (requestError) {
-      const message = requestError instanceof Error ? requestError.message : '保存预习问题失败'
-      setError(message)
-      return message
-    } finally {
-      setBusy(false)
-    }
-  }
-
-  async function savePreviewQuestions(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = event.currentTarget
-    const incompleteLabels = incompleteFields(form, completionFields.preview_questions)
-    if (incompleteLabels.length > 0) {
-      setError(`请先完成：${incompleteLabels.join('、')}`)
-      return
-    }
-    await persistPreviewQuestions(form)
   }
 
   async function confirmSkipPractice() {
@@ -1163,7 +1366,7 @@ export function DailyRecordPage() {
   async function persistTodayCompletion() {
     if (!record) return '当前学习记录不可完成'
     setBusy(true)
-    setActiveAiTask({ key: 'daily_summary', label: '正在整理今日摘要与学习记忆' })
+    startAiTask({ key: 'daily_summary', label: '正在整理今日摘要与学习记忆' })
     setError('')
     try {
       const completedRecord = await api.completeDailyRecord(record.id)
@@ -1175,7 +1378,7 @@ export function DailyRecordPage() {
       setError(message)
       return message
     } finally {
-      setActiveAiTask(null)
+      finishAiTask('daily_summary')
       setBusy(false)
     }
   }
@@ -1220,10 +1423,16 @@ export function DailyRecordPage() {
 
   const completedCount = record.workflow_nodes.filter((node) => node.status !== 'pending').length
   const progress = Math.round((completedCount / record.workflow_nodes.length) * 100)
-  const latestInteraction = (kind: AiInteractionKind) =>
-    record.ai_interactions.filter((item) => item.kind === kind).at(-1)
-  const recallInteraction = latestInteraction('recall_review')
-  const reconstructionInteraction = latestInteraction('reconstruction_review')
+  const recallReflection = (record.guided_reflections ?? []).find((item) => item.kind === 'recall')
+  const reconstructionReflection = (record.guided_reflections ?? []).find(
+    (item) => item.kind === 'reconstruct',
+  )
+  const legacyRecallInteraction = record.ai_interactions
+    .filter((item) => item.kind === 'recall_review')
+    .at(-1)
+  const legacyReconstructionInteraction = record.ai_interactions
+    .filter((item) => item.kind === 'reconstruction_review')
+    .at(-1)
   const exercise = record.exercises.at(-1)
   const structuredItems = exercise?.format_version === 2 ? (exercise.items ?? []) : []
   const activeExerciseItem = structuredItems.find(
@@ -1232,9 +1441,14 @@ export function DailyRecordPage() {
   const activeReviewItem = structuredItems.find(
     (item) => item.position === activeReviewItemPosition,
   ) ?? structuredItems[0]
+  const mistakeDraftItem = structuredItems.find((item) => item.id === newMistakeItemId)
+  const activeReviewMistake = activeReviewItem
+    ? exercise?.mistakes.find((mistake) => mistake.exercise_item_id === activeReviewItem.id)
+    : undefined
   const answeredExerciseItems = structuredItems.filter((item) => (
     Boolean(item.response?.answer_markdown.trim())
     || Boolean(item.response?.selected_options.length)
+    || Boolean(item.response?.attachments?.length)
   )).length
   const materialScopes: MaterialScopeOption[] = [
     {
@@ -1279,70 +1493,36 @@ export function DailyRecordPage() {
   }
 
   const aiTaskState = (key: AiTaskKey) => {
-    if (activeAiTask?.key === key) {
-      const matchingRun = activeServerRun?.task === 'material_context'
-        || activeServerRun?.task === aiTaskRunKeys[key]
-        ? activeServerRun
-        : null
+    const activeTask = activeAiTasks[key]
+    if (activeTask) {
+      const matchingRun = activeServerRuns.find((run) => run.task === aiTaskRunKeys[key])
+        ?? (activeAiTaskCount === 1
+          ? activeServerRuns.find((run) => run.task === 'material_context')
+          : undefined)
       return (
         <AiTaskStatus
           key={key}
-          label={activeAiTask.label}
-          phase={aiRunPhase(matchingRun)}
+          label={activeTask.label}
+          phase={aiRunPhase(matchingRun ?? null)}
           startedAt={matchingRun?.created_at}
-          onCancel={matchingRun ? cancelActiveAiTask : undefined}
+          onCancel={matchingRun ? () => void cancelActiveAiTask(matchingRun) : undefined}
         />
       )
     }
-    if (aiTaskFeedback?.key !== key) return null
-    const reconnectRequired = aiTaskFeedback.message.includes('重新连接 Codex')
-      || aiTaskFeedback.message.includes('登录已失效')
+    const feedback = aiTaskFeedbacks[key]
+    if (!feedback) return null
+    const reconnectRequired = feedback.message.includes('重新连接 Codex')
+      || feedback.message.includes('登录已失效')
     return (
       <div
-        className={`ai-task-feedback ai-task-feedback--${aiTaskFeedback.tone}`}
-        role={aiTaskFeedback.tone === 'error' ? 'alert' : 'status'}
+        className={`ai-task-feedback ai-task-feedback--${feedback.tone}`}
+        role={feedback.tone === 'error' ? 'alert' : 'status'}
       >
-        <span>{aiTaskFeedback.message}</span>
+        <span>{feedback.message}</span>
         {reconnectRequired && <Link className="text-button" to="/settings">前往设置</Link>}
       </div>
     )
   }
-
-  const aiReviewPanel = (
-    kind: AiInteractionKind,
-    interaction: typeof recallInteraction,
-    buttonLabel: string,
-    feedbackDescription: string,
-  ) => (
-    <div className="ai-workspace">
-      <button className="secondary-button" type="button" disabled={busy} onClick={() => generateInteraction(kind)}>
-        <Sparkles size={16} />{activeAiTask?.key === kind ? '生成中' : interaction ? '重新评阅' : buttonLabel}
-      </button>
-      {aiTaskState(kind)}
-      {interaction && (
-        <>
-          <details className="prompt-details">
-            <summary>查看本次提示词</summary>
-            <div className="prompt-toolbar">
-              <strong>评阅提示词</strong>
-              <button className="icon-button" type="button" title="复制提示词" aria-label="复制提示词" onClick={() => copyText(interaction.prompt_text)}><Clipboard size={16} /></button>
-            </div>
-            <textarea className="prompt-output" readOnly rows={10} value={interaction.prompt_text} />
-          </details>
-          <form
-            className="stack-form"
-            data-dirty-key={`interaction-${interaction.id}`}
-            data-save-kind="interaction"
-            data-entity-id={interaction.id}
-            onSubmit={(event) => saveInteractionFeedback(event, interaction.id)}
-          >
-            <EditableMarkdown title="评阅反馈" description={feedbackDescription} name="feedback_text" rows={14} defaultValue={interaction.feedback_text} />
-            <button className="secondary-button" type="submit"><Save size={15} />保存反馈</button>
-          </form>
-        </>
-      )}
-    </div>
-  )
 
   return (
     <main ref={pageRef} className="context-page" onInputCapture={updateDirtyForm} onChangeCapture={updateDirtyForm}>
@@ -1361,15 +1541,19 @@ export function DailyRecordPage() {
         dirtyCount={dirtyFormKeys.size}
         recoveredLabel={draftRecovered ? '已恢复上次草稿' : undefined}
       />
-      {!activeAiTask && activeServerRun && (
-        <AiTaskStatus
-          label="正在继续上次的生成任务"
-          phase={aiRunPhase(activeServerRun)}
-          startedAt={activeServerRun.created_at}
-          recovered
-          onCancel={cancelActiveAiTask}
-        />
-      )}
+      {activeServerRuns
+        .filter((run) => !(Object.keys(activeAiTasks) as AiTaskKey[])
+          .some((key) => aiTaskRunKeys[key] === run.task))
+        .map((run) => (
+          <AiTaskStatus
+            key={run.id}
+            label="正在继续上次的生成任务"
+            phase={aiRunPhase(run)}
+            startedAt={run.created_at}
+            recovered
+            onCancel={() => void cancelActiveAiTask(run)}
+          />
+        ))}
       <SourceReferences
         references={record.ai_source_refs ?? []}
         materials={record.materials ?? []}
@@ -1383,26 +1567,57 @@ export function DailyRecordPage() {
         <div className="flow-list">
         <FlowNode {...flowNodeProps('recall')}>
           {record.previous_preview_questions && (
-            <aside className="previous-preview" aria-label="上次留下的预习问题">
-              <div><strong>上次留下的预习问题</strong><span>{record.previous_preview_questions.study_date}</span></div>
-              <ol>{record.previous_preview_questions.questions.map((question) => <li key={question}>{question}</li>)}</ol>
+            <aside className="previous-preview" aria-label="上次学习回顾">
+              <div>
+                <strong>上次学习回顾</strong>
+                <span>
+                  {record.previous_preview_questions.study_date}
+                  {' · '}
+                  {record.previous_preview_questions.section_title}
+                </span>
+              </div>
+              {record.previous_preview_questions.questions.length > 0 ? (
+                <ol>
+                  {record.previous_preview_questions.questions.map((question) => (
+                    <li key={question}><MarkdownContent content={question} /></li>
+                  ))}
+                </ol>
+              ) : (
+                <p className="muted">上次学习没有留下衔接问题。完成自由回忆后，可让 AI 根据上次学习补充 3 个问题。</p>
+              )}
             </aside>
           )}
-          <form className="node-form" data-dirty-key="content-recall" data-save-kind="content" onSubmit={(event) => saveContent(event, 'recall')}>
-            <FieldLabel title="相关知识" description="回忆上次学习、前一小节或当前内容需要的先修知识"><textarea name="recall_last_learned" rows={3} defaultValue={record.recall_last_learned} /></FieldLabel>
-            <FieldLabel title="核心概念" description="写下仍能记得的关键概念"><textarea name="recall_core_concepts" rows={3} defaultValue={record.recall_core_concepts} /></FieldLabel>
-            <FieldLabel title="清晰部分" description="哪些内容还能完整说明"><textarea name="recall_clear_parts" rows={3} defaultValue={record.recall_clear_parts} /></FieldLabel>
-            <div className="form-actions"><button className="secondary-button" type="submit" disabled={busy}><Save size={15} />保存</button><button className="primary-button" type="submit" data-complete="true" disabled={busy}><Check size={15} />保存并完成</button></div>
+          <form className="node-form" data-dirty-key="content-recall" data-save-kind="content" onSubmit={(event) => saveReflectionSeed(event, 'recall', 'recall')}>
+            <FieldLabel title="自由回忆" description="先不看材料，写下你记得的相关知识、核心概念和它们之间的关系"><textarea name="recall_last_learned" rows={7} defaultValue={record.recall_last_learned} /></FieldLabel>
+            <div className="form-actions form-actions--guided">
+              <button className="secondary-button" type="submit" disabled={busy}><Save size={15} />保存回忆</button>
+              <button className="primary-button" type="submit" data-generate="true" disabled={busy || isAiTaskActive('recall_questions')}><Sparkles size={15} />{isAiTaskActive('recall_questions') ? '生成中' : '保存并生成 3 个问题'}</button>
+              <button className="text-button" type="submit" data-complete="true" disabled={busy}>AI 不可用？仅保存并完成</button>
+            </div>
           </form>
-          {record.previous_records.length > 0 && (
+          {record.recall_last_learned.trim() && record.previous_records.length > 0 ? (
             <details className="previous-records">
               <summary>回忆后核对最近记录</summary>
               {record.previous_records.map((item) => (
                 <div key={item.id}><strong>{item.study_date}</strong><p>{item.reconstruct_main_learning || item.recall_last_learned || '未填写摘要'}</p></div>
               ))}
             </details>
+          ) : null}
+          {aiTaskState('recall_questions')}
+          {recallReflection && (
+            <GuidedReflectionPanel
+              reflection={recallReflection}
+              busy={busy || isAiTaskActive('recall_questions') || isAiTaskActive('recall_review')}
+              taskState={aiTaskState('recall_review')}
+              completeLabel="完成闭卷回顾"
+              onSubmit={saveGuidedReflection}
+              onRegenerate={() => void regenerateGuidedQuestions('recall', 'recall')}
+              onComplete={() => void setNodeStatus('recall', 'completed')}
+            />
           )}
-          {aiReviewPanel('recall_review', recallInteraction, '评阅回顾', '可继续编辑并保存本次评阅结果')}
+          {!recallReflection && legacyRecallInteraction?.feedback_text && (
+            <details className="legacy-ai-feedback"><summary>查看旧版回顾评阅</summary><MarkdownContent content={legacyRecallInteraction.feedback_text} /></details>
+          )}
         </FlowNode>
 
         <FlowNode {...flowNodeProps('study')}>
@@ -1460,19 +1675,35 @@ export function DailyRecordPage() {
         </FlowNode>
 
         <FlowNode {...flowNodeProps('reconstruct')}>
-          <form className="node-form" data-dirty-key="content-reconstruct" data-save-kind="content" onSubmit={(event) => saveContent(event, 'reconstruct')}>
-            <FieldLabel title="问题与目标" description="这部分内容主要解决什么问题"><textarea name="reconstruct_problem" rows={3} defaultValue={record.reconstruct_problem} /></FieldLabel>
-            <FieldLabel title="主要内容" description="用自己的语言概括本次学到的内容"><textarea name="reconstruct_main_learning" rows={4} defaultValue={record.reconstruct_main_learning} /></FieldLabel>
-            <FieldLabel title="定义与推导" description="记录关键定义、公式和推导过程"><textarea name="reconstruct_math" rows={5} defaultValue={record.reconstruct_math} /></FieldLabel>
-            <div className="form-actions"><button className="secondary-button" type="submit" disabled={busy}><Save size={15} />保存</button><button className="primary-button" type="submit" data-complete="true" disabled={busy}><Check size={15} />保存并完成</button></div>
+          <form className="node-form" data-dirty-key="content-reconstruct" data-save-kind="content" onSubmit={(event) => saveReflectionSeed(event, 'reconstruct', 'reconstruct')}>
+            <FieldLabel title="自由重构" description="合上材料，用自己的语言重建本次内容的主线、关键概念、条件和推导"><textarea name="reconstruct_main_learning" rows={9} defaultValue={record.reconstruct_main_learning} /></FieldLabel>
+            <div className="form-actions form-actions--guided">
+              <button className="secondary-button" type="submit" disabled={busy}><Save size={15} />保存重构</button>
+              <button className="primary-button" type="submit" data-generate="true" disabled={busy || isAiTaskActive('reconstruction_questions')}><Sparkles size={15} />{isAiTaskActive('reconstruction_questions') ? '生成中' : '保存并生成 3 个问题'}</button>
+              <button className="text-button" type="submit" data-complete="true" disabled={busy}>AI 不可用？仅保存并完成</button>
+            </div>
           </form>
-          {aiReviewPanel('reconstruction_review', reconstructionInteraction, '检查重构', '可继续编辑并保存本次检查结果')}
+          {aiTaskState('reconstruction_questions')}
+          {reconstructionReflection && (
+            <GuidedReflectionPanel
+              reflection={reconstructionReflection}
+              busy={busy || isAiTaskActive('reconstruction_questions') || isAiTaskActive('reconstruction_review')}
+              taskState={aiTaskState('reconstruction_review')}
+              completeLabel="完成主动重构"
+              onSubmit={saveGuidedReflection}
+              onRegenerate={() => void regenerateGuidedQuestions('reconstruct', 'reconstruct')}
+              onComplete={() => void setNodeStatus('reconstruct', 'completed')}
+            />
+          )}
+          {!reconstructionReflection && legacyReconstructionInteraction?.feedback_text && (
+            <details className="legacy-ai-feedback"><summary>查看旧版重构评阅</summary><MarkdownContent content={legacyReconstructionInteraction.feedback_text} /></details>
+          )}
         </FlowNode>
 
         <FlowNode {...flowNodeProps('practice')}>
           <div className="node-actions-line">
             <div className="node-action-group">
-              <button className="secondary-button" type="button" disabled={busy} onClick={createExercise}><Sparkles size={16} />{activeAiTask?.key === 'practice' ? '生成中' : exercise ? '生成新一组练习' : '生成练习'}</button>
+              <button className="secondary-button" type="button" disabled={busy || isAiTaskActive('practice')} onClick={createExercise}><Sparkles size={16} />{isAiTaskActive('practice') ? '生成中' : exercise ? '生成新一组练习' : '生成练习'}</button>
               {exercise?.format_version === 1 && (
                 <button
                   className="text-button text-button--danger"
@@ -1514,6 +1745,7 @@ export function DailyRecordPage() {
                     {structuredItems.map((item) => {
                       const answered = Boolean(item.response?.answer_markdown.trim())
                         || Boolean(item.response?.selected_options.length)
+                        || Boolean(item.response?.attachments?.length)
                       return (
                         <button
                           className={item.position === activeExerciseItem.position ? 'active' : ''}
@@ -1565,12 +1797,45 @@ export function DailyRecordPage() {
                         ))}
                       </fieldset>
                     ) : (
-                      <FieldLabel title="我的作答" description="写出完整思路、计算或推导过程">
-                        <textarea name="answer_markdown" rows={12} defaultValue={activeExerciseItem.response?.answer_markdown ?? ''} />
-                      </FieldLabel>
+                      <>
+                        <FieldLabel title="我的作答" description="写出完整思路、计算或推导过程">
+                          <textarea name="answer_markdown" rows={12} defaultValue={activeExerciseItem.response?.answer_markdown ?? ''} />
+                        </FieldLabel>
+                        <div className="answer-attachments" aria-label="作答附件">
+                          <div className="answer-attachments__toolbar">
+                            <span>手写或长篇作答也可以附上图片/PDF</span>
+                            <label className="answer-attachment-button">
+                              <Paperclip size={14} aria-hidden="true" />
+                              {attachmentBusyItemId === activeExerciseItem.id ? '处理中' : '添加附件'}
+                              <input
+                                type="file"
+                                accept="application/pdf,image/png,image/jpeg,image/webp"
+                                disabled={attachmentBusyItemId === activeExerciseItem.id || (activeExerciseItem.response?.attachments?.length ?? 0) >= 5}
+                                onChange={(event) => {
+                                  const file = event.currentTarget.files?.[0]
+                                  event.currentTarget.value = ''
+                                  if (file) void uploadExerciseAttachment(activeExerciseItem.id, file)
+                                }}
+                              />
+                            </label>
+                          </div>
+                          {(activeExerciseItem.response?.attachments?.length ?? 0) > 0 && (
+                            <ul className="answer-attachment-list">
+                              {activeExerciseItem.response?.attachments?.map((attachment) => (
+                                <li key={attachment.id}>
+                                  <FileText size={14} aria-hidden="true" />
+                                  <span>{attachment.original_name}</span>
+                                  <small>{Math.max(1, Math.round(attachment.size_bytes / 1024))} KB</small>
+                                  {attachment.processing_status === 'ready_truncated' && <small title="为控制批改上下文长度，仅使用前 50000 个字符">文字已截取</small>}
+                                  <button type="button" disabled={attachmentBusyItemId === activeExerciseItem.id} aria-label={`移除附件 ${attachment.original_name}`} onClick={() => void deleteExerciseAttachment(activeExerciseItem.id, attachment.id)}><X size={13} /></button>
+                                </li>
+                              ))}
+                            </ul>
+                          )}
+                        </div>
+                      </>
                     )}
                     {activeExerciseItem.options.length > 0 && <input type="hidden" name="answer_markdown" value="" />}
-                    {activeExerciseItem.source_refs.length > 0 && <p className="exercise-source">依据：{activeExerciseItem.source_refs.join('；')}</p>}
                     {activeExerciseItem.response?.feedback_markdown && (
                       <div className={`exercise-item-feedback exercise-item-feedback--${activeExerciseItem.response.verdict}`}>
                         <div><strong>本题反馈</strong><span>{exerciseVerdictLabels[activeExerciseItem.response.verdict] ?? '已批改'}</span></div>
@@ -1578,9 +1843,13 @@ export function DailyRecordPage() {
                       </div>
                     )}
                     <div className="exercise-question-footer">
-                      <button className="secondary-button" type="button" disabled={busy || activeExerciseItem.position === 1} onClick={() => void moveExerciseItem(activeExerciseItem.position - 1, activeExerciseItem.id)}><ChevronLeft size={16} />上一题</button>
+                      {activeExerciseItem.position > 1 ? (
+                        <button className="secondary-button" type="button" disabled={busy} onClick={() => void moveExerciseItem(activeExerciseItem.position - 1, activeExerciseItem.id)}><ChevronLeft size={16} />上一题</button>
+                      ) : <span className="exercise-nav-spacer" aria-hidden="true" />}
                       <span>已作答 {answeredExerciseItems}/{structuredItems.length}</span>
-                      <button className="secondary-button" type="button" disabled={busy || activeExerciseItem.position === structuredItems.length} onClick={() => void moveExerciseItem(activeExerciseItem.position + 1, activeExerciseItem.id)}>下一题<ChevronRight size={16} /></button>
+                      {activeExerciseItem.position < structuredItems.length ? (
+                        <button className="secondary-button" type="button" disabled={busy} onClick={() => void moveExerciseItem(activeExerciseItem.position + 1, activeExerciseItem.id)}>下一题<ChevronRight size={16} /></button>
+                      ) : <span className="exercise-nav-spacer" aria-hidden="true" />}
                     </div>
                     <div className="form-actions">
                       <button className="secondary-button" type="submit" disabled={busy}><Save size={15} />保存本题</button>
@@ -1608,7 +1877,7 @@ export function DailyRecordPage() {
         <FlowNode {...flowNodeProps('review')}>
           {exercise ? (
             <>
-              <button className="secondary-button" type="button" disabled={busy || (structuredItems.length > 0 && exercise.status === 'draft')} onClick={() => createGradingPrompt(exercise.id)}><Sparkles size={16} />{activeAiTask?.key === 'grading' ? '批改中' : exercise.ai_feedback ? '重新批改' : '批改答案'}</button>
+              <button className="secondary-button" type="button" disabled={busy || isAiTaskActive('grading') || (structuredItems.length > 0 && exercise.status === 'draft')} onClick={() => createGradingPrompt(exercise.id)}><Sparkles size={16} />{isAiTaskActive('grading') ? '批改中' : exercise.ai_feedback ? '重新批改' : '批改答案'}</button>
               {aiTaskState('grading')}
               {exercise.grading_prompt && (
                 <details className="prompt-details"><summary>查看本次批改提示词</summary><div className="prompt-toolbar"><strong>批改提示词</strong><button className="icon-button" type="button" title="复制批改提示词" aria-label="复制批改提示词" onClick={() => copyText(exercise.grading_prompt)}><Clipboard size={16} /></button></div><textarea className="prompt-output" readOnly rows={12} value={exercise.grading_prompt} /></details>
@@ -1665,11 +1934,33 @@ export function DailyRecordPage() {
                         <div><strong>本题反馈</strong><span>{exerciseVerdictLabels[activeReviewItem.response?.verdict ?? ''] ?? '未批改'}</span></div>
                         <MarkdownContent content={activeReviewItem.response?.feedback_markdown || '暂无反馈'} />
                       </section>
-                      {activeReviewItem.source_refs.length > 0 && <p className="exercise-source">依据：{activeReviewItem.source_refs.join('；')}</p>}
+                      {(activeReviewItem.response?.verdict === 'incorrect' || activeReviewItem.response?.verdict === 'partial') && (
+                        <div className="exercise-review-mistake-action">
+                          <span>{activeReviewMistake ? '本题已整理到错题记录' : '需要后续复习时，可整理当前题'}</span>
+                          {activeReviewMistake ? (
+                            <span className="record-status record-status--understood">已整理</span>
+                          ) : (
+                            <button
+                              className="secondary-button"
+                              type="button"
+                              aria-controls="mistake-editor"
+                              aria-expanded={newMistakeItemId === activeReviewItem.id}
+                              onClick={(event) => requestMistakeDraftState(
+                                newMistakeItemId === activeReviewItem.id ? null : activeReviewItem.id,
+                                event.currentTarget,
+                              )}
+                            ><Plus size={15} />{newMistakeItemId === activeReviewItem.id ? '收起整理' : '整理本题'}</button>
+                          )}
+                        </div>
+                      )}
                       <div className="exercise-question-footer">
-                        <button className="secondary-button" type="button" disabled={activeReviewItem.position === 1} onClick={() => setActiveReviewItemPosition(activeReviewItem.position - 1)}><ChevronLeft size={16} />上一题</button>
+                        {activeReviewItem.position > 1 ? (
+                          <button className="secondary-button" type="button" onClick={() => setActiveReviewItemPosition(activeReviewItem.position - 1)}><ChevronLeft size={16} />上一题</button>
+                        ) : <span className="exercise-nav-spacer" aria-hidden="true" />}
                         <span>逐题复核 {activeReviewItem.position}/{structuredItems.length}</span>
-                        <button className="secondary-button" type="button" disabled={activeReviewItem.position === structuredItems.length} onClick={() => setActiveReviewItemPosition(activeReviewItem.position + 1)}>下一题<ChevronRight size={16} /></button>
+                        {activeReviewItem.position < structuredItems.length ? (
+                          <button className="secondary-button" type="button" onClick={() => setActiveReviewItemPosition(activeReviewItem.position + 1)}>下一题<ChevronRight size={16} /></button>
+                        ) : <span className="exercise-nav-spacer" aria-hidden="true" />}
                       </div>
                     </article>
                   </div>
@@ -1689,36 +1980,19 @@ export function DailyRecordPage() {
               <div className="mistakes-workspace">
                 <div className="subsection-heading">
                   <div><strong>错题整理</strong><span>{exercise.mistakes.length} 条</span></div>
-                  <button
-                    className="secondary-button"
-                    type="button"
-                    onClick={(event) => {
-                      if (newMistakeExerciseId !== exercise.id) {
-                        const firstIncorrectItem = structuredItems.find((item) => (
-                          item.response?.verdict === 'incorrect'
-                          || item.response?.verdict === 'partial'
-                        ))
-                        if (firstIncorrectItem) {
-                          setActiveExerciseItemPosition(firstIncorrectItem.position)
-                        }
-                      }
-                      requestMistakeDraftState(
-                        newMistakeExerciseId === exercise.id ? null : exercise.id,
-                        event.currentTarget,
-                      )
-                    }}
-                  ><Plus size={15} />整理一条错题</button>
+                  {structuredItems.length > 0 && <span>请在上方错误题中选择“整理本题”</span>}
                 </div>
-                {newMistakeExerciseId === exercise.id && (
+                {newMistakeItemId !== null && mistakeDraftItem && (
                   <form
+                    id="mistake-editor"
                     className="mistake-form"
-                    data-dirty-key={`mistake-new-${exercise.id}`}
+                    data-dirty-key={`mistake-new-${mistakeDraftItem.id}`}
                     data-save-kind="mistake-create"
                     data-entity-id={exercise.id}
                     onSubmit={(event) => createMistake(event, exercise.id)}
                   >
-                    <MistakeFields exerciseItem={activeExerciseItem} legacyQuestion={exercise.ai_questions} legacyAnswer={exercise.user_answers} />
-                    <div className="form-actions"><button className="primary-button" type="submit" disabled={busy}><Save size={15} />保存错题</button><button className="text-button" type="button" onClick={(event) => requestMistakeDraftState(null, event.currentTarget)}>取消</button></div>
+                    <MistakeFields exerciseItem={mistakeDraftItem} />
+                    <div className="form-actions form-actions--equal"><button className="primary-button" type="submit" disabled={busy}><Save size={15} />保存错题</button><button className="secondary-button" type="button" onClick={(event) => requestMistakeDraftState(null, event.currentTarget)}>取消</button></div>
                   </form>
                 )}
                 <div className="mistake-list">
@@ -1763,33 +2037,30 @@ export function DailyRecordPage() {
         </FlowNode>
 
         <FlowNode {...flowNodeProps('daily_close')}>
-          <button className="secondary-button" type="button" disabled={busy} onClick={generatePreviewPrompt}><Sparkles size={16} />{activeAiTask?.key === 'preview_questions' ? '生成中' : record.preview_question_set ? '重新生成问题' : '生成预习问题'}</button>
+          <button className="secondary-button" type="button" disabled={busy || isAiTaskActive('preview_questions')} onClick={generatePreviewPrompt}><Sparkles size={16} />{isAiTaskActive('preview_questions') ? '生成中' : record.preview_question_set ? '重新生成问题' : '生成下次回顾问题'}</button>
           {aiTaskState('preview_questions')}
           {record.preview_question_set && (
             <>
               <details className="prompt-details">
-                <summary>查看本次预习提示词</summary>
-                <div className="prompt-toolbar"><strong>预习问题提示词</strong><button className="icon-button" type="button" title="复制预习问题提示词" aria-label="复制预习问题提示词" onClick={() => copyText(record.preview_question_set?.prompt_text ?? '')}><Clipboard size={16} /></button></div>
+                <summary>查看下次回顾问题提示词</summary>
+                <div className="prompt-toolbar"><strong>下次回顾问题提示词</strong><button className="icon-button" type="button" title="复制下次回顾问题提示词" aria-label="复制下次回顾问题提示词" onClick={() => copyText(record.preview_question_set?.prompt_text ?? '')}><Clipboard size={16} /></button></div>
                 <textarea className="prompt-output" readOnly rows={12} value={record.preview_question_set.prompt_text} />
               </details>
-              <form
-                key={[
-                  record.preview_question_set.prompt_text,
-                  record.preview_question_set.question_1,
-                  record.preview_question_set.question_2,
-                  record.preview_question_set.question_3,
-                ].join('|')}
-                className="node-form preview-question-form"
-                data-dirty-key={`preview-${record.id}`}
-                data-save-kind="preview"
-                onSubmit={savePreviewQuestions}
-              >
-                <div className="field-group-intro"><strong>三个预习问题</strong><span>为下次学习保留三个启动问题</span></div>
-                <label>问题一<textarea name="question_1" rows={2} defaultValue={record.preview_question_set.question_1} /></label>
-                <label>问题二<textarea name="question_2" rows={2} defaultValue={record.preview_question_set.question_2} /></label>
-                <label>问题三<textarea name="question_3" rows={2} defaultValue={record.preview_question_set.question_3} /></label>
-                <div className="form-actions"><button className="secondary-button" type="submit" disabled={busy}><Save size={15} />保存 3 条问题</button></div>
-              </form>
+              <section className="node-form preview-question-form" aria-label="三个下次回顾问题">
+                <div className="field-group-intro"><strong>三个下次回顾问题</strong><span>问题只读；会自动带到同一课程的下一次学习</span></div>
+                <ol>
+                  {[
+                    record.preview_question_set.question_1,
+                    record.preview_question_set.question_2,
+                    record.preview_question_set.question_3,
+                  ].map((question, index) => (
+                    <li key={`${index}-${question}`}>
+                      <strong>问题 {index + 1}</strong>
+                      <MarkdownContent content={question} />
+                    </li>
+                  ))}
+                </ol>
+              </section>
             </>
           )}
           {aiTaskState('daily_summary')}

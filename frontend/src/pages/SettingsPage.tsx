@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { FormEvent } from 'react'
+import type { ChangeEvent, FormEvent } from 'react'
 import {
   Bot,
   CircleAlert,
@@ -17,6 +17,7 @@ import {
   RotateCcw,
   Save,
   Type,
+  Upload,
   UserRound,
 } from 'lucide-react'
 import {
@@ -31,6 +32,7 @@ import type {
   AiProvider,
   AiProviderOptions,
   AiProviderStatus,
+  BackupPreview,
   CourseSummary,
   ExportContentType,
   MaterialSearchSettings,
@@ -138,6 +140,12 @@ export function SettingsPage() {
   const [exportLoading, setExportLoading] = useState(false)
   const [exportBusy, setExportBusy] = useState(false)
   const [exportError, setExportError] = useState('')
+  const [backupBusy, setBackupBusy] = useState(false)
+  const [backupError, setBackupError] = useState('')
+  const [restorePreview, setRestorePreview] = useState<BackupPreview | null>(null)
+  const [restoreVaultPath, setRestoreVaultPath] = useState(vaultPath)
+  const [restoreBusy, setRestoreBusy] = useState(false)
+  const [restoreError, setRestoreError] = useState('')
   const [providers, setProviders] = useState<AiProviderStatus[]>([])
   const [providerOptions, setProviderOptions] = useState<AiProviderOptions[]>([])
   const [providerDrafts, setProviderDrafts] = useState<Partial<Record<AiProvider, {
@@ -403,6 +411,104 @@ export function SettingsPage() {
   async function saveManualPath(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     await saveVault(manualPath)
+  }
+
+  async function createBackup() {
+    setBackupBusy(true)
+    setBackupError('')
+    try {
+      const file = await api.createFullBackup()
+      const downloadUrl = URL.createObjectURL(file.blob)
+      const link = document.createElement('a')
+      link.href = downloadUrl
+      link.download = file.filename
+      document.body.append(link)
+      link.click()
+      link.remove()
+      URL.revokeObjectURL(downloadUrl)
+      setNotice('完整备份已生成')
+    } catch (requestError) {
+      setBackupError(requestError instanceof Error ? requestError.message : '生成备份失败')
+    } finally {
+      setBackupBusy(false)
+    }
+  }
+
+  async function inspectRestoreFile(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0]
+    event.currentTarget.value = ''
+    if (!file) return
+    setRestoreBusy(true)
+    setRestoreError('')
+    try {
+      const preview = await api.inspectBackup(file)
+      setRestorePreview(preview)
+      setRestoreVaultPath(vaultPath)
+    } catch (requestError) {
+      setBackupError(requestError instanceof Error ? requestError.message : '读取备份失败')
+    } finally {
+      setRestoreBusy(false)
+    }
+  }
+
+  async function browseRestoreVault() {
+    setRestoreBusy(true)
+    setRestoreError('')
+    try {
+      const result = await api.browseObsidianVault()
+      if (result.vault) setRestoreVaultPath(result.vault.path)
+    } catch (requestError) {
+      setRestoreError(requestError instanceof Error ? requestError.message : '选择 Vault 失败')
+    } finally {
+      setRestoreBusy(false)
+    }
+  }
+
+  function closeRestorePreview() {
+    if (restoreBusy) return
+    const token = restorePreview?.token
+    setRestorePreview(null)
+    setRestoreError('')
+    if (token) {
+      void api.discardStagedBackup(token).catch((requestError) => {
+        setBackupError(
+          requestError instanceof Error
+            ? `清理暂存备份失败：${requestError.message}`
+            : '清理暂存备份失败',
+        )
+      })
+    }
+  }
+
+  async function restoreBackup() {
+    if (!restorePreview) return
+    setRestoreBusy(true)
+    setRestoreError('')
+    try {
+      await api.restoreBackup(restorePreview.token, restoreVaultPath)
+      setNotice('正在安全恢复并重启 Lumina，请不要关闭页面')
+      for (let attempt = 0; attempt < 90; attempt += 1) {
+        await new Promise((resolve) => window.setTimeout(resolve, 1000))
+        try {
+          const result = await api.getBackupRestoreStatus(restorePreview.token)
+          if (result.status === 'completed') {
+            window.location.reload()
+            return
+          }
+          if (result.status === 'failed') {
+            setRestoreError(result.detail || '恢复失败，原有数据已保留')
+            return
+          }
+        } catch {
+          // The local service is expected to be briefly unavailable while restarting.
+        }
+      }
+      setRestoreError('Lumina 重启超时，请重新打开应用并检查恢复结果')
+    } catch (requestError) {
+      setRestoreError(requestError instanceof Error ? requestError.message : '恢复备份失败')
+    } finally {
+      setRestoreBusy(false)
+    }
   }
 
   async function openExportDialog() {
@@ -1002,12 +1108,28 @@ export function SettingsPage() {
         </details>
       </section>
 
-      <section className="settings-section" aria-labelledby="export-settings-title">
-        <div className="settings-section__heading"><Download size={19} aria-hidden="true" /><h2 id="export-settings-title">导出</h2></div>
+      <section className="settings-section" aria-labelledby="backup-settings-title">
+        <div className="settings-section__heading"><Database size={19} aria-hidden="true" /><h2 id="backup-settings-title">备份与恢复</h2></div>
         <div className="settings-action-row">
           <div>
-            <strong>Markdown 导出</strong>
-            <span>选择课程和内容，导出 Markdown 文件。</span>
+            <strong>完整学习数据备份</strong>
+            <span>包含课程、学习记录、材料、作答附件和 Lumina 管理的 Obsidian 笔记；不包含 AI 登录凭据和日志。</span>
+          </div>
+          <div className="settings-inline-actions">
+            <button className="primary-button" type="button" disabled={backupBusy} onClick={() => void createBackup()}>
+              <Download size={16} aria-hidden="true" />{backupBusy ? '生成中' : '创建备份'}
+            </button>
+            <label className="secondary-button backup-file-button">
+              <Upload size={16} aria-hidden="true" />导入备份
+              <input type="file" accept="application/zip,.zip" disabled={restoreBusy} onChange={(event) => void inspectRestoreFile(event)} />
+            </label>
+          </div>
+        </div>
+        {backupError && <p className="error-banner" role="alert">{backupError}</p>}
+        <div className="settings-action-row">
+          <div>
+            <strong>内容导出（Markdown）</strong>
+            <span>仅用于阅读或二次整理，不能用来恢复 Lumina 的完整使用状态。</span>
           </div>
           <button className="secondary-button" type="button" onClick={() => void openExportDialog()}>
             <Download size={16} aria-hidden="true" />
@@ -1069,6 +1191,47 @@ export function SettingsPage() {
         }}
         onConfirm={shutdownLocalService}
       />
+
+      <AppDialog
+        open={restorePreview !== null}
+        title="确认恢复备份"
+        description="恢复前会自动创建一份当前数据的安全备份；恢复过程会重启 Lumina。"
+        size="medium"
+        busy={restoreBusy}
+        onClose={closeRestorePreview}
+        footer={(
+          <>
+            <button className="secondary-button" type="button" disabled={restoreBusy} onClick={closeRestorePreview}>取消</button>
+            <button className="primary-button" type="button" disabled={restoreBusy || !desktopLaunch || Boolean(restorePreview?.requires_obsidian_vault && !restoreVaultPath.trim())} onClick={() => void restoreBackup()}>
+              {restoreBusy ? '处理中' : '恢复并重启'}
+            </button>
+          </>
+        )}
+      >
+        {restoreError && <p className="dialog-error" role="alert">{restoreError}</p>}
+        {restorePreview && (
+          <div className="backup-preview">
+            <dl>
+              <div><dt>创建时间</dt><dd>{restorePreview.created_at || '旧版备份未记录'}</dd></div>
+              <div><dt>归档内容</dt><dd>{restorePreview.file_count} 个文件 · {Math.max(1, Math.round(restorePreview.total_size_bytes / 1024 / 1024))} MB</dd></div>
+              <div><dt>包含范围</dt><dd>{[
+                '学习数据库',
+                restorePreview.includes_materials ? '学习材料' : '',
+                restorePreview.includes_attachments ? '作答附件' : '',
+                restorePreview.includes_notes ? '小节笔记' : '',
+              ].filter(Boolean).join('、')}</dd></div>
+            </dl>
+            {restorePreview.requires_obsidian_vault && (
+              <div className="backup-vault-choice">
+                <label>笔记恢复到<input value={restoreVaultPath} onChange={(event) => setRestoreVaultPath(event.target.value)} placeholder="请选择当前机器上的 Obsidian Vault" /></label>
+                {browseSupported && <button className="secondary-button" type="button" disabled={restoreBusy} onClick={() => void browseRestoreVault()}><FolderOpen size={15} />浏览</button>}
+              </div>
+            )}
+            {!desktopLaunch && <p className="dialog-error">当前由诊断终端运行。请从已安装的 Lumina 图标打开后再执行恢复。</p>}
+            <p className="backup-warning">恢复会用备份替换当前课程与学习记录。若目标 Vault 中存在同路径但内容不同的笔记，恢复会停止且保留当前数据。</p>
+          </div>
+        )}
+      </AppDialog>
 
       <AppDialog
         open={exportOpen}

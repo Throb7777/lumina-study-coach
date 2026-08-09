@@ -26,7 +26,6 @@ from app.models import (
     DailyRecord,
     Exercise,
     MaterialContextSession,
-    PreviewQuestionSet,
     Section,
     SectionMemory,
     SectionStatus,
@@ -89,6 +88,57 @@ TEXT_OUTPUT_SCHEMA = {
         "handoff": HANDOFF_SCHEMA,
     },
     "required": ["display_markdown", "handoff"],
+    "additionalProperties": False,
+}
+
+GUIDED_QUESTIONS_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "questions": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "enum": ["q1", "q2", "q3"]},
+                    "question_markdown": {"type": "string"},
+                    "focus": {"type": "string"},
+                },
+                "required": ["id", "question_markdown", "focus"],
+                "additionalProperties": False,
+            },
+        },
+    },
+    "required": ["questions"],
+    "additionalProperties": False,
+}
+
+GUIDED_REVIEW_OUTPUT_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "reviews": {
+            "type": "array",
+            "minItems": 3,
+            "maxItems": 3,
+            "items": {
+                "type": "object",
+                "properties": {
+                    "id": {"type": "string", "enum": ["q1", "q2", "q3"]},
+                    "verdict": {
+                        "type": "string",
+                        "enum": ["correct", "partial", "incorrect"],
+                    },
+                    "feedback_markdown": {"type": "string"},
+                },
+                "required": ["id", "verdict", "feedback_markdown"],
+                "additionalProperties": False,
+            },
+        },
+        "display_markdown": {"type": "string"},
+        "handoff": HANDOFF_SCHEMA,
+    },
+    "required": ["reviews", "display_markdown", "handoff"],
     "additionalProperties": False,
 }
 
@@ -250,7 +300,9 @@ DAILY_SUMMARY_OUTPUT_SCHEMA = {
 }
 
 RAW_MATERIAL_LIMITS = {
+    AiRunTask.RECALL_QUESTIONS: 5,
     AiRunTask.RECALL_REVIEW: 5,
+    AiRunTask.RECONSTRUCTION_QUESTIONS: 6,
     AiRunTask.RECONSTRUCTION_REVIEW: 6,
     AiRunTask.PRACTICE_GENERATION: 5,
     AiRunTask.EXERCISE_GRADING: 3,
@@ -269,11 +321,13 @@ CODEX_TASK_TIMEOUTS = {
 }
 
 TASK_LABELS = {
+    AiRunTask.RECALL_QUESTIONS: "回顾定向问题",
     AiRunTask.RECALL_REVIEW: "回顾评阅",
+    AiRunTask.RECONSTRUCTION_QUESTIONS: "重构定向问题",
     AiRunTask.RECONSTRUCTION_REVIEW: "重构检查",
     AiRunTask.PRACTICE_GENERATION: "练习生成",
     AiRunTask.EXERCISE_GRADING: "练习批改",
-    AiRunTask.PREVIEW_QUESTIONS: "预习问题",
+    AiRunTask.PREVIEW_QUESTIONS: "下次回顾问题",
     AiRunTask.SECTION_NOTE_DRAFT: "笔记整理",
     AiRunTask.SECTION_MEMORY: "记忆整理",
     AiRunTask.DAILY_SUMMARY: "今日摘要",
@@ -282,8 +336,13 @@ TASK_LABELS = {
 }
 
 UPSTREAM_TASKS = {
-    AiRunTask.RECALL_REVIEW: set(),
-    AiRunTask.RECONSTRUCTION_REVIEW: {AiRunTask.RECALL_REVIEW},
+    AiRunTask.RECALL_QUESTIONS: set(),
+    AiRunTask.RECALL_REVIEW: {AiRunTask.RECALL_QUESTIONS},
+    AiRunTask.RECONSTRUCTION_QUESTIONS: {AiRunTask.RECALL_REVIEW},
+    AiRunTask.RECONSTRUCTION_REVIEW: {
+        AiRunTask.RECALL_REVIEW,
+        AiRunTask.RECONSTRUCTION_QUESTIONS,
+    },
     AiRunTask.PRACTICE_GENERATION: {
         AiRunTask.RECALL_REVIEW,
         AiRunTask.RECONSTRUCTION_REVIEW,
@@ -488,22 +547,45 @@ def previous_daily_context(session: Session, record: DailyRecord) -> str:
 
 
 def previous_preview_context(session: Session, record: DailyRecord) -> str:
-    previous = session.scalar(
+    previous = previous_learning_record(session, record)
+    if previous is None:
+        return "暂无"
+    heading = f"{previous.study_date} · {previous.section.title}"
+    if previous.preview_question_set is None:
+        return f"{heading}\n- 上次学习未生成衔接问题"
+    questions = previous.preview_question_set
+    values = [
+        normalize_ai_markdown(value)
+        for value in [questions.question_1, questions.question_2, questions.question_3]
+    ]
+    question_lines = "\n".join(f"- {value}" for value in values if value.strip())
+    return f"{heading}\n{question_lines or '- 上次学习未生成衔接问题'}"
+
+
+def previous_learning_record(session: Session, record: DailyRecord) -> DailyRecord | None:
+    """Return the immediately preceding completed study in the same course."""
+    return session.scalar(
         select(DailyRecord)
-        .join(PreviewQuestionSet)
+        .join(Section, DailyRecord.section_id == Section.id)
+        .join(Chapter, Section.chapter_id == Chapter.id)
         .where(
-            DailyRecord.section_id == record.section_id,
-            DailyRecord.study_date < record.study_date,
+            Chapter.course_id == record.section.chapter.course_id,
+            DailyRecord.is_completed.is_(True),
+            or_(
+                DailyRecord.study_date < record.study_date,
+                and_(
+                    DailyRecord.study_date == record.study_date,
+                    DailyRecord.id < record.id,
+                ),
+            ),
         )
-        .options(joinedload(DailyRecord.preview_question_set))
+        .options(
+            joinedload(DailyRecord.preview_question_set),
+            joinedload(DailyRecord.section),
+        )
         .order_by(DailyRecord.study_date.desc(), DailyRecord.id.desc())
         .limit(1)
     )
-    if previous is None or previous.preview_question_set is None:
-        return "暂无"
-    questions = previous.preview_question_set
-    values = [questions.question_1, questions.question_2, questions.question_3]
-    return "\n".join(f"- {value}" for value in values if value.strip()) or "暂无"
 
 
 def handoff_context(
@@ -614,7 +696,9 @@ def upstream_source_reference_keys(
 
 def material_query_for_task(record: DailyRecord, task: AiRunTask) -> str:
     task_fields = {
+        AiRunTask.RECALL_QUESTIONS: [record.recall_last_learned],
         AiRunTask.RECALL_REVIEW: [record.recall_last_learned, record.recall_core_concepts],
+        AiRunTask.RECONSTRUCTION_QUESTIONS: [record.reconstruct_main_learning],
         AiRunTask.RECONSTRUCTION_REVIEW: [
             record.reconstruct_problem,
             record.reconstruct_main_learning,
@@ -624,6 +708,7 @@ def material_query_for_task(record: DailyRecord, task: AiRunTask) -> str:
             record.reconstruct_main_learning,
             record.reconstruct_math,
             record.reconstruct_problem,
+            "例题 练习题 思考题 示例 exercise problem example",
         ],
         AiRunTask.EXERCISE_GRADING: [
             record.reconstruct_main_learning,
@@ -657,9 +742,11 @@ def build_task_context(
     course_memory = ensure_course_memory(session, course.id)
     chapter_memory = ensure_chapter_memory(session, chapter.id)
     section_memory = ensure_section_memory(session, record.section_id)
-    source_records = (
-        previous_material_records(session, record) if task == AiRunTask.RECALL_REVIEW else None
-    )
+    if task in {AiRunTask.RECALL_QUESTIONS, AiRunTask.RECALL_REVIEW}:
+        previous = previous_learning_record(session, record)
+        source_records = [previous] if previous is not None else []
+    else:
+        source_records = None
     upstream_refs = upstream_source_reference_keys(session, record, task)
     material_limit = RAW_MATERIAL_LIMITS.get(task, 0)
     if upstream_refs:
@@ -705,7 +792,7 @@ def build_task_context(
         "【最近两次学习摘要】",
         previous_daily_context(session, record),
         "",
-        "【上次留下的预习问题】",
+        "【上次学习留下的回顾问题】",
         previous_preview_context(session, record),
         "",
         "【本次流程上游交接】",
@@ -963,7 +1050,7 @@ def daily_summary_source(session: Session, record: DailyRecord) -> str:
             record.preview_question_set.question_2,
             record.preview_question_set.question_3,
         ]
-        sections.append("预习问题：" + "；".join(value for value in questions if value.strip()))
+        sections.append("下次回顾问题：" + "；".join(value for value in questions if value.strip()))
     handoffs = handoff_context(session, record)
     if handoffs != "暂无":
         sections.append(f"评阅交接：{compact(handoffs, 1600)}")

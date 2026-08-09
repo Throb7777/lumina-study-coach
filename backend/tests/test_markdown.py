@@ -69,10 +69,10 @@ P(A)=\frac{4}{9}
 
 
 def test_repairs_bell_character_before_latex_dot_commands() -> None:
-    source = "$Ax=x_1a_1+\x07cdots+x_na_n$ and $a_1,\x07dots,a_n$"
+    source = "$Ax=x_1a_1+\x07cdots+x_na_n$ and $a_1,\x07dots,a_n$ and $\x07omega$"
 
     assert normalize_ai_markdown(source) == (
-        r"$Ax=x_1a_1+\cdots+x_na_n$ and $a_1,\dots,a_n$"
+        r"$Ax=x_1a_1+\cdots+x_na_n$ and $a_1,\dots,a_n$ and $\omega$"
     )
 
 
@@ -106,3 +106,10 @@ def test_reports_unclosed_fences_and_unmatched_math_structure() -> None:
         "unmatched_display_math",
         "unmatched_latex_environment",
     }
+
+
+def test_reports_and_removes_unknown_control_characters_during_validation() -> None:
+    normalized, issues = validate_note_markdown("正文\x01内容")
+
+    assert normalized == "正文内容"
+    assert [issue.code for issue in issues] == ["forbidden_control"]

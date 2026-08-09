@@ -2,6 +2,37 @@
 
 All notable public changes to Lumina are documented in this file.
 
+## [0.1.3] - 2026-08-09
+
+### Added
+
+- Add AI-guided recall and reconstruction questions with per-question checking,
+  while keeping one open recall field for the learner's own retrieval.
+- Allow non-choice practice responses to include compact image or PDF
+  attachments, with bounded file validation and lifecycle cleanup.
+- Add portable backup import so courses, study records, materials, referenced
+  response attachments, settings, and managed notes can move to another Lumina
+  installation.
+
+### Fixed
+
+- Carry the previous study record's preview questions into the next record and
+  review earlier learning instead of the material that is about to be studied.
+- Avoid duplicated or overly broad AI practice questions and hide unavailable
+  previous/next navigation actions at the ends of a practice set.
+- Render legacy Markdown, escaped LaTeX, and control-character notation
+  consistently across summaries, notes, practice, and mistake review.
+- Keep unrelated study controls usable while an AI task is running and dismiss
+  transient generation confirmations automatically.
+
+### Changed
+
+- Simplify mistake collection around the original question, correct answer,
+  learner note, and compact error-type selection.
+- Auto-collapse course study history after navigation and completion.
+- Remove internal material references and grading evidence from learner-facing
+  notes and practice feedback, and standardise related action sizes.
+
 ## [0.1.2] - 2026-07-28
 
 ### Added
@@ -67,6 +98,7 @@ All notable public changes to Lumina are documented in this file.
 - The application interface is currently Simplified Chinese.
 - The Windows installer is not code-signed yet.
 
+[0.1.3]: https://github.com/Throb7777/lumina-study-coach/compare/v0.1.2...v0.1.3
 [0.1.2]: https://github.com/Throb7777/lumina-study-coach/compare/v0.1.1...v0.1.2
 [0.1.1]: https://github.com/Throb7777/lumina-study-coach/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.0

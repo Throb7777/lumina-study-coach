@@ -15,7 +15,7 @@ def test_health_endpoint(client: TestClient) -> None:
     assert response.json() == {
         "status": "ok",
         "service": "learning-flow-coach-api",
-        "version": "0.1.2",
+        "version": "0.1.3",
         "frontend_build_id": None,
         "frontend_entry": None,
         "frontend_ready": False,

@@ -13,7 +13,7 @@ class Settings(BaseSettings):
     )
 
     app_name: str = "learning-flow-coach-api"
-    app_version: str = "0.1.2"
+    app_version: str = "0.1.3"
     host: str = "127.0.0.1"
     port: int = 8000
     static_dir: Path = PROJECT_ROOT / "frontend" / "dist"
@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     @property
     def material_dir(self) -> Path:
         return self.runtime_data_dir / "materials"
+
+    @property
+    def answer_attachment_dir(self) -> Path:
+        return self.runtime_data_dir / "answer-attachments"
 
     @property
     def log_dir(self) -> Path:

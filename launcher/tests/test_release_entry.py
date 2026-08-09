@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import json
+import sqlite3
 import tempfile
+from contextlib import closing
+from datetime import datetime
 from pathlib import Path
 
+from launcher.data_archive import create_backup_archive
 from launcher.release_entry import (
     apply_install_config,
     configure_release_environment,
@@ -13,9 +18,18 @@ from launcher.release_entry import (
     release_data_root,
     release_paths,
     release_port,
+    run_server,
     stop_service,
     wait_until_stopped,
 )
+
+
+def create_record_database(path: Path, value: str) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with closing(sqlite3.connect(path)) as connection:
+        connection.execute("create table records (value text)")
+        connection.execute("insert into records values (?)", (value,))
+        connection.commit()
 
 
 def test_release_data_root_prefers_explicit_override(tmp_path: Path) -> None:
@@ -206,6 +220,69 @@ def test_stop_service_ignores_unrelated_port_when_lumina_is_not_running(
     monkeypatch.setattr("launcher.release_entry.port_is_in_use", lambda *_args: True)
 
     assert stop_service({}, silent=True) == 0
+
+
+def test_run_server_applies_pending_restore_and_starts_replacement_service(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    environment = {"LUMINA_DATA_DIR": str(tmp_path / "runtime")}
+    paths = release_paths(
+        environment,
+        executable=tmp_path / "Lumina.exe",
+        bundled=tmp_path / "bundle",
+    )
+    create_record_database(paths.database, "current")
+    source_database = tmp_path / "source" / "learning-flow-coach.db"
+    create_record_database(source_database, "restored")
+    source_materials = source_database.parent / "materials"
+    source_materials.mkdir()
+    source_materials.joinpath("lesson.txt").write_text("portable", encoding="utf-8")
+    archive = create_backup_archive(
+        source_database,
+        source_materials,
+        tmp_path / "source-backups",
+        datetime(2026, 8, 8, 12, 0, 0),
+    )
+    assert archive is not None
+    staging = paths.data_root / "restore-staging"
+    staging.mkdir(parents=True)
+    staged_archive = staging / ("a" * 32 + ".zip")
+    archive.replace(staged_archive)
+    paths.data_root.joinpath("restore.pending.json").write_text(
+        json.dumps(
+            {
+                "token": "a" * 32,
+                "archive": str(staged_archive),
+                "obsidian_vault_path": "",
+            }
+        ),
+        encoding="utf-8",
+    )
+    starts: list[tuple[object, dict[str, str]]] = []
+    monkeypatch.setattr("app.desktop_server.run", lambda: None)
+    monkeypatch.setattr(
+        "launcher.release_entry.start_service",
+        lambda actual_paths, actual_environment: starts.append(
+            (actual_paths, actual_environment)
+        ),
+    )
+
+    assert run_server(paths, environment) == 0
+
+    with closing(sqlite3.connect(paths.database)) as connection:
+        assert connection.execute("select value from records").fetchone() == ("restored",)
+    assert paths.materials.joinpath("lesson.txt").read_text(encoding="utf-8") == "portable"
+    assert not staged_archive.exists()
+    assert not paths.data_root.joinpath("restore.pending.json").exists()
+    result = json.loads(
+        paths.data_root.joinpath("restore-results", "a" * 32 + ".json").read_text(
+            encoding="utf-8"
+        )
+    )
+    assert result["status"] == "completed"
+    assert Path(result["safety_backup"]).is_file()
+    assert starts == [(paths, environment)]
 
 
 def test_installer_uses_named_install_and_uninstall_components() -> None:

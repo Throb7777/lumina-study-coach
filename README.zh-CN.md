@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2"><img alt="最新版本" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach?include_prereleases"></a>
+  <a href="https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.3"><img alt="最新版本" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach?include_prereleases"></a>
   <a href="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Windows 10 和 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b7894">
 </p>
 
-> **公开预览版：** Lumina v0.1.2 是当前 Windows 公开版本。
+> **公开预览版：** Lumina v0.1.3 是当前 Windows 公开版本。
 
 Lumina 把课程整理为章节、小节和连续的学习记录。每次学习围绕闭卷回顾、学习、
 主动重构、练习、批改纠错和下次问题展开；学完小节后，再把最终笔记保存为普通
@@ -29,8 +29,8 @@ Markdown 文件并交给 Obsidian 管理。
 
 ## 下载
 
-从 [Lumina v0.1.2 Release](https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2)
-下载 `install_Lumina-0.1.2.exe`。安装包已经包含 Web 应用、本地服务、
+从 [Lumina v0.1.3 Release](https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.3)
+下载 `install_Lumina-0.1.3.exe`。安装包已经包含 Web 应用、本地服务、
 Python 运行时以及英文和简体中文 OCR，普通使用不需要另外安装 Node.js、
 Python 或 Tesseract。
 
@@ -43,6 +43,7 @@ Python 或 Tesseract。
 - 每次继续小节时创建一条独立学习记录。
 - 引导完成回顾、主动重构、练习、纠错和下次问题。
 - 一次生成 12 道结构化练习，支持逐题作答与逐题查看批改。
+- 非选择题可附加体积较小的图片或 PDF 作为作答材料。
 - 保存错题、学习记忆和可搜索的小节笔记。
 - 导入原生文本 PDF、扫描 PDF、网页，以及受支持的公开视频字幕。
 - 只对需要识别的 PDF 页面自动使用内置中英文 OCR。
@@ -51,6 +52,7 @@ Python 或 Tesseract。
 - 章节和小节材料使用独立弹窗管理，不挤占课程阅读区域。
 - 将最终笔记保存到 Obsidian 的 `课程/章节/小节.md`。
 - 课程、材料、配置和索引均保存在本机。
+- 支持创建和导入可迁移备份，用于在新机器上恢复学习数据。
 - 内置一份只读示例，可直接查看完整学习流程。
 
 ## AI 功能不是必需项
@@ -113,7 +115,7 @@ Windows 下安装 Inno Setup 6 后，运行 `build-installer.cmd` 可以生成�
 
 ## 当前边界
 
-Lumina v0.1.2 是本地单用户 Windows 应用。当前不提供云同步、多用户协作、
+Lumina v0.1.3 是本地单用户 Windows 应用。当前不提供云同步、多用户协作、
 移动端专项界面、ChatGPT/Gemini 网页自动控制或整个 Obsidian Vault 索引。
 外部 AI 功能也会受到 CLI 版本、账号权限和服务状态影响。
 

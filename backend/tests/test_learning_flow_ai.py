@@ -140,6 +140,7 @@ def test_context_uses_only_completed_preceding_sections_and_previous_preview(
             section_id=current["id"],
             study_date=date.today() - timedelta(days=1),
             context_summary="昨天已经掌握条件定义",
+            is_completed=True,
         )
         older.preview_question_set = PreviewQuestionSet(
             prompt_text="preview",
@@ -347,7 +348,7 @@ def test_legacy_exercise_can_be_deleted_with_related_mistakes(client: TestClient
     assert client.delete(f"/api/exercises/{exercise['id']}").status_code == 404
 
 
-def test_preview_questions_are_saved_and_shown_on_next_record(
+def test_preview_questions_are_read_only_handoff_to_next_course_record(
     client: TestClient, app: FastAPI
 ) -> None:
     current_day = [date(2026, 7, 20)]
@@ -375,25 +376,103 @@ def test_preview_questions_are_saved_and_shown_on_next_record(
         == 422
     )
     questions = {
-        "question_1": "贝叶斯公式和全概率公式如何连接？",
+        "question_1": "公式 $P(\\omega)=1$ 为什么必须归一化？",
         "question_2": "分母为零时为什么不能使用条件概率？",
         "question_3": "如何把公式用于一次实际判断？",
     }
-    response = client.put(f"/api/daily-records/{record['id']}/preview-questions", json=questions)
+    stored_questions = {**questions, "question_1": "公式 $P(\x07omega)=1$ 为什么必须归一化？"}
+    response = client.put(
+        f"/api/daily-records/{record['id']}/preview-questions",
+        json=stored_questions,
+    )
     assert response.status_code == 200
     assert response.json()["question_2"] == questions["question_2"]
 
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        stored_record = session.get(DailyRecord, record["id"])
+        stored_record.is_completed = True
+        session.commit()
+
+    next_section = client.post(
+        f"/api/chapters/{section['chapter_id']}/sections",
+        json={"title": "第二节"},
+    ).json()
+
     current_day[0] += timedelta(days=1)
-    next_record = client.post(f"/api/sections/{section['id']}/daily-records/today").json()
+    next_record = client.post(
+        f"/api/sections/{next_section['id']}/daily-records/today"
+    ).json()
     assert next_record["id"] != record["id"]
     assert next_record["previous_preview_questions"] == {
+        "daily_record_id": record["id"],
+        "section_id": section["id"],
+        "section_title": section["title"],
         "study_date": "2026-07-20",
         "questions": list(questions.values()),
     }
+    carried_reflection = next_record["guided_reflections"][0]
+    assert carried_reflection["kind"] == "recall"
+    assert [item["question_markdown"] for item in carried_reflection["questions"]] == list(
+        questions.values()
+    )
     prompt = client.post(
         f"/api/daily-records/{next_record['id']}/ai-prompts/recall_review"
     ).json()["prompt_text"]
     assert questions["question_1"] in prompt
+
+
+def test_recall_handoff_does_not_skip_latest_completed_record_without_questions(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    course = client.post("/api/courses", json={"name": "严格顺序课程"}).json()
+    chapter = client.post(
+        f"/api/courses/{course['id']}/chapters",
+        json={"title": "第一章"},
+    ).json()
+    first_section = client.post(
+        f"/api/chapters/{chapter['id']}/sections",
+        json={"title": "第一节"},
+    ).json()
+    second_section = client.post(
+        f"/api/chapters/{chapter['id']}/sections",
+        json={"title": "第二节"},
+    ).json()
+    third_section = client.post(
+        f"/api/chapters/{chapter['id']}/sections",
+        json={"title": "第三节"},
+    ).json()
+    first_record = client.post(
+        f"/api/sections/{first_section['id']}/daily-records/today"
+    ).json()
+    client.post(f"/api/daily-records/{first_record['id']}/preview-questions/prompt")
+    client.put(
+        f"/api/daily-records/{first_record['id']}/preview-questions",
+        json={"question_1": "旧问题一", "question_2": "旧问题二", "question_3": "旧问题三"},
+    )
+    second_record = client.post(
+        f"/api/sections/{second_section['id']}/daily-records/today"
+    ).json()
+
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        session.get(DailyRecord, first_record["id"]).is_completed = True
+        session.get(DailyRecord, second_record["id"]).is_completed = True
+        session.commit()
+
+    third_record = client.post(
+        f"/api/sections/{third_section['id']}/daily-records/today"
+    ).json()
+
+    assert third_record["previous_preview_questions"] == {
+        "daily_record_id": second_record["id"],
+        "section_id": second_section["id"],
+        "section_title": "第二节",
+        "study_date": second_record["study_date"],
+        "questions": [],
+    }
+    assert third_record["guided_reflections"] == []
 
 
 def test_learning_flow_missing_resources(client: TestClient) -> None:

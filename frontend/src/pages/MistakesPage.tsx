@@ -2,6 +2,7 @@ import { BookX, CheckCircle2, CircleAlert, Filter, ListChecks } from 'lucide-rea
 import { useMemo, useState } from 'react'
 import { Link, useLoaderData } from 'react-router-dom'
 import type { MistakeStatus, MistakeType } from '../api'
+import { MarkdownContent, MarkdownInlineContent } from '../components/MarkdownContent'
 import type { MistakesRouteData } from '../routeData'
 
 const mistakeTypeLabels: Record<MistakeType, string> = {
@@ -112,8 +113,11 @@ export function MistakesPage() {
           {filteredMistakes.map((mistake) => (
             <details className="index-record" key={mistake.id}>
               <summary>
-                <span className="index-record__title">{mistake.original_question}</span>
+                <span className="index-record__title">
+                  <MarkdownInlineContent content={mistake.original_question} />
+                </span>
                 <span className="mistake-type-tag">{mistakeTypeLabels[mistake.error_type]}</span>
+                {mistake.exercise_item_id === null && <span className="legacy-record-tag">旧版记录</span>}
                 <span className={`record-status record-status--${mistake.status}`}>
                   {mistake.status === 'understood' ? <CheckCircle2 size={14} aria-hidden="true" /> : <CircleAlert size={14} aria-hidden="true" />}
                   {mistake.status === 'understood' ? '已理解' : '未解决'}
@@ -122,11 +126,18 @@ export function MistakesPage() {
               </summary>
               <div className="index-record__body">
                 <p className="record-context">{mistake.course_name} / {mistake.chapter_title} / {mistake.section_title}</p>
-                <dl className="mistake-detail-grid">
-                  <div><dt>错误内容</dt><dd>{mistake.error_content}</dd></div>
-                  <div><dt>为什么错</dt><dd>{mistake.cause_analysis}</dd></div>
-                  <div><dt>正确思路</dt><dd>{mistake.correct_approach}</dd></div>
-                </dl>
+                <section className="mistake-question-card">
+                  <h3>原题</h3>
+                  <MarkdownContent content={mistake.original_question || '暂无题目内容'} />
+                </section>
+                <section className="mistake-answer-card">
+                  <h3>正确作答</h3>
+                  <MarkdownContent content={mistake.correct_approach || '暂无参考答案'} />
+                </section>
+                <section className="mistake-attention-card">
+                  <h3>我的注意点</h3>
+                  <p>{mistake.error_content || '暂未填写'}</p>
+                </section>
                 <Link className="secondary-button inline-link-button" to={`/daily-records/${mistake.daily_record_id}`}>打开学习记录</Link>
               </div>
             </details>

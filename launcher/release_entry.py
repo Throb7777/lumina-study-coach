@@ -80,6 +80,7 @@ class ReleasePaths:
     data_root: Path
     database: Path
     materials: Path
+    attachments: Path
     ai_runtime: Path
     log_file: Path
     first_run_marker: Path
@@ -101,6 +102,7 @@ def release_paths(
         data_root=data_root,
         database=data_root / "learning-flow-coach.db",
         materials=data_root / "materials",
+        attachments=data_root / "answer-attachments",
         ai_runtime=data_root / "ai",
         log_file=data_root / "logs" / "server.log",
         first_run_marker=data_root / "first-run.pending",
@@ -405,6 +407,56 @@ def run_server(paths: ReleasePaths, environment: dict[str, str]) -> int:
     from app.desktop_server import run
 
     run()
+    pending_restore = paths.data_root / "restore.pending.json"
+    if pending_restore.is_file():
+        from launcher.data_archive import (
+            create_backup_archive,
+            managed_note_files,
+            restore_backup_archive,
+        )
+
+        token = "unknown"
+        staged_archive: Path | None = None
+        result: dict[str, object]
+        try:
+            payload = json.loads(pending_restore.read_text(encoding="utf-8"))
+            token = str(payload["token"])
+            staged_archive = Path(str(payload["archive"])).resolve()
+            staging_root = (paths.data_root / "restore-staging").resolve()
+            if not staged_archive.is_relative_to(staging_root):
+                raise ValueError("restore archive is outside the staging directory")
+            raw_vault = str(payload.get("obsidian_vault_path") or "").strip()
+            note_destination = Path(raw_vault).resolve() if raw_vault else None
+            safety_archive = create_backup_archive(
+                paths.database,
+                paths.materials,
+                paths.data_root / "backups" / "pre-restore",
+                keep=3,
+                attachments=paths.attachments,
+                notes=managed_note_files(paths.database),
+            )
+            if safety_archive is None:
+                raise RuntimeError("cannot create the pre-restore safety backup")
+            restore_backup_archive(
+                staged_archive,
+                paths.data_root,
+                replace=True,
+                note_destination=note_destination,
+            )
+            result = {"status": "completed", "safety_backup": str(safety_archive)}
+        except Exception as error:
+            result = {"status": "failed", "detail": str(error)}
+        finally:
+            pending_restore.unlink(missing_ok=True)
+            if staged_archive is not None:
+                staged_archive.unlink(missing_ok=True)
+            result_dir = paths.data_root / "restore-results"
+            result_dir.mkdir(parents=True, exist_ok=True)
+            (result_dir / f"{token}.json").write_text(
+                json.dumps(result, ensure_ascii=False),
+                encoding="utf-8",
+            )
+        start_service(paths, environment)
     return 0
 
 
@@ -448,6 +500,7 @@ def backup_data(paths: ReleasePaths, destination: Path) -> int:
         paths.database,
         paths.materials,
         destination.expanduser().resolve(),
+        attachments=paths.attachments,
     )
     if archive is not None:
         print(archive)

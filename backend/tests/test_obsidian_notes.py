@@ -30,7 +30,7 @@ def test_settings_note_read_write_and_external_conflict(client: TestClient, tmp_
     assert client.get("/api/settings").json() == {
         "obsidian_vault_path": "",
         "learner_profile": "",
-        "service_version": "0.1.2",
+        "service_version": "0.1.3",
         "desktop_launch": False,
         "semantic_search_enabled": False,
         "semantic_search_model_ready": False,
@@ -302,6 +302,9 @@ def test_section_note_prompt_is_generated_and_persisted(client: TestClient) -> N
     assert "条件概率定义" in response.json()["prompt_text"]
     assert "独立公式块使用 `$$...$$`" in response.json()["prompt_text"]
     assert "不要省略花括号" in response.json()["prompt_text"]
+    assert "笔记正文不要输出材料引用、来源标记或来源清单" in response.json()["prompt_text"]
+    assert "`handoff.source_refs` 只保留本次实际使用过的材料分块" in response.json()["prompt_text"]
+    assert "在展示内容中用 `[材料标题" not in response.json()["prompt_text"]
 
     refreshed = client.get(f"/api/daily-records/{record['id']}").json()
     assert refreshed["section_note_prompt"]["id"] == response.json()["id"]

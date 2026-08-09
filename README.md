@@ -11,13 +11,13 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2"><img alt="Latest release" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach?include_prereleases"></a>
+  <a href="https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.3"><img alt="Latest release" src="https://img.shields.io/github/v/release/Throb7777/lumina-study-coach?include_prereleases"></a>
   <a href="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml"><img alt="CI" src="https://github.com/Throb7777/lumina-study-coach/actions/workflows/ci.yml/badge.svg"></a>
   <a href="LICENSE"><img alt="Apache License 2.0" src="https://img.shields.io/badge/license-Apache--2.0-blue"></a>
   <img alt="Windows 10 and 11" src="https://img.shields.io/badge/Windows-10%20%7C%2011-5b7894">
 </p>
 
-> **Public preview:** Lumina v0.1.2 is the current public Windows release. The
+> **Public preview:** Lumina v0.1.3 is the current public Windows release. The
 > application interface is currently available in Simplified Chinese.
 
 Lumina turns a course into chapters, sections, and focused study records. Each
@@ -31,8 +31,8 @@ Markdown files that remain usable in Obsidian.
 
 ## Download
 
-Download `install_Lumina-0.1.2.exe` from the
-[Lumina v0.1.2 release](https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.2).
+Download `install_Lumina-0.1.3.exe` from the
+[Lumina v0.1.3 release](https://github.com/Throb7777/lumina-study-coach/releases/tag/v0.1.3).
 The installer contains the web application, local service, Python runtime, and
 English and Simplified Chinese OCR support. Node.js, Python, and a separate
 Tesseract installation are not required for normal use.
@@ -47,6 +47,7 @@ release before installation.
 - Creates one study record whenever you continue a section.
 - Guides recall, active reconstruction, practice, correction, and next-step questions.
 - Generates 12-question practice sets with one-question-at-a-time answering and review.
+- Accepts compact image and PDF attachments for non-choice practice answers.
 - Keeps structured mistakes, learning memory, and section notes searchable.
 - Imports native-text and scanned PDFs, web pages, and supported public-video
   transcripts.
@@ -59,6 +60,7 @@ release before installation.
   reading view.
 - Writes final section notes to `course/chapter/section.md` inside an Obsidian vault.
 - Stores courses, materials, settings, and indexes on your own computer.
+- Creates and imports portable backups for moving learning data to another installation.
 - Includes a read-only example course so the full workflow can be explored safely.
 
 ## AI Is Optional
@@ -129,7 +131,7 @@ self-contained installer. Detailed instructions are in
 
 ## Project Status
 
-Lumina v0.1.2 is a local, single-user Windows application. It does not provide
+Lumina v0.1.3 is a local, single-user Windows application. It does not provide
 cloud sync, multi-user collaboration, mobile-specific UI, automatic web-chat
 control, or full-vault Obsidian indexing. External AI features remain subject
 to the installed CLIs, account permissions, and provider availability.

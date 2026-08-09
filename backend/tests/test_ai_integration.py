@@ -9,6 +9,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.ai_providers as ai_providers_module
+import app.api as api_module
 from app.ai_providers import (
     AiModelOption,
     AiProviderError,
@@ -25,7 +26,13 @@ from app.ai_providers import (
     friendly_provider_launch_error,
     resolve_codex_executable,
 )
-from app.models import AiProvider, AiRun, AiRunStatus, AiRunTask
+from app.models import (
+    AiProvider,
+    AiRun,
+    AiRunStatus,
+    AiRunTask,
+    ExerciseResponseAttachment,
+)
 
 
 def structured_items() -> list[dict]:
@@ -133,7 +140,23 @@ class FakeCodex:
             "error_patterns": ["错误 A"],
         }
         properties = output_schema.get("properties", {}) if output_schema else {}
-        if "items" in properties:
+        if "reviews" in properties:
+            text = json.dumps(
+                {
+                    "reviews": [
+                        {
+                            "id": f"q{index}",
+                            "verdict": "correct" if index == 1 else "partial",
+                            "feedback_markdown": f"第 {index} 题反馈",
+                        }
+                        for index in range(1, 4)
+                    ],
+                    "display_markdown": "整体复习建议",
+                    "handoff": handoff,
+                },
+                ensure_ascii=False,
+            )
+        elif "items" in properties:
             text = json.dumps(
                 {"items": structured_items(), "handoff": handoff},
                 ensure_ascii=False,
@@ -154,13 +177,28 @@ class FakeCodex:
                 ensure_ascii=False,
             )
         elif "questions" in properties:
-            text = json.dumps(
-                {
-                    "questions": ["问题一", "问题二", "问题三"],
-                    "handoff": handoff,
-                },
-                ensure_ascii=False,
-            )
+            if properties["questions"].get("items", {}).get("type") == "object":
+                text = json.dumps(
+                    {
+                        "questions": [
+                            {
+                                "id": f"q{index}",
+                                "question_markdown": f"定向问题 {index}",
+                                "focus": f"检查点 {index}",
+                            }
+                            for index in range(1, 4)
+                        ]
+                    },
+                    ensure_ascii=False,
+                )
+            else:
+                text = json.dumps(
+                    {
+                        "questions": ["问题一", "问题二", "问题三"],
+                        "handoff": handoff,
+                    },
+                    ensure_ascii=False,
+                )
         elif (
             "display_markdown" in properties
             and "section_memory" in properties
@@ -299,6 +337,61 @@ def create_record(client: TestClient) -> tuple[dict, dict, dict]:
         },
     )
     return course, section, record
+
+
+def test_guided_reflection_questions_answers_and_review(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    app.state.ai_service = FakeAiService()
+    _, _, record = create_record(client)
+
+    generated = client.post(
+        f"/api/daily-records/{record['id']}/guided-reflections/recall/questions"
+    )
+    assert generated.status_code == 200
+    reflection = generated.json()
+    assert reflection["kind"] == "recall"
+    assert [question["id"] for question in reflection["questions"]] == ["q1", "q2", "q3"]
+    assert reflection["answers"] == {}
+
+    incomplete = client.put(
+        f"/api/guided-reflections/{reflection['id']}/answers",
+        json={"answers": {"q1": "回答一"}},
+    )
+    assert incomplete.status_code == 200
+    assert client.post(
+        f"/api/guided-reflections/{reflection['id']}/review"
+    ).status_code == 422
+
+    saved = client.put(
+        f"/api/guided-reflections/{reflection['id']}/answers",
+        json={"answers": {"q1": "回答一", "q2": "回答二", "q3": "回答三"}},
+    )
+    assert saved.status_code == 200
+    reviewed = client.post(f"/api/guided-reflections/{reflection['id']}/review")
+    assert reviewed.status_code == 200
+    assert reviewed.json()["feedback_text"] == "整体复习建议"
+    assert [item["id"] for item in reviewed.json()["reviews"]] == ["q1", "q2", "q3"]
+    assert reviewed.json()["reviews"][1]["verdict"] == "partial"
+
+    daily_record = client.get(f"/api/daily-records/{record['id']}").json()
+    assert daily_record["guided_reflections"][0]["answers"]["q3"] == "回答三"
+
+
+def test_guided_reflection_requires_saved_seed(client: TestClient, app: FastAPI) -> None:
+    app.state.ai_service = FakeAiService()
+    _, _, record = create_record(client)
+    client.patch(
+        f"/api/daily-records/{record['id']}",
+        json={"reconstruct_main_learning": ""},
+    )
+
+    response = client.post(
+        f"/api/daily-records/{record['id']}/guided-reflections/reconstruct/questions"
+    )
+    assert response.status_code == 422
+    assert "自由重构" in response.json()["detail"]
 
 
 def test_provider_status_and_login(client: TestClient, app: FastAPI) -> None:
@@ -923,8 +1016,58 @@ def test_antigravity_login_completes_without_waiting_for_interactive_exit(
     assert process.waited is True
 
 
-def test_embedded_ai_workflow_and_learning_memory(client: TestClient, app: FastAPI) -> None:
+def test_course_deletion_removes_answer_attachment_files(
+    client: TestClient,
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     app.state.ai_service = FakeAiService()
+    monkeypatch.setattr(
+        api_module,
+        "extract_attachment_text",
+        lambda _path, _media_type: "答案",
+    )
+    course, _section, record = create_record(client)
+    exercise = client.post(f"/api/daily-records/{record['id']}/ai-practice").json()
+    item = exercise["items"][4]
+    upload = client.post(
+        f"/api/exercise-items/{item['id']}/attachments",
+        files={
+            "file": (
+                "answer.png",
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+                + (100).to_bytes(4, "big")
+                + (100).to_bytes(4, "big"),
+                "image/png",
+            )
+        },
+    )
+    assert upload.status_code == 201
+    attachment_id = upload.json()["items"][4]["response"]["attachments"][0]["id"]
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        attachment = session.get(ExerciseResponseAttachment, attachment_id)
+        assert attachment is not None
+        stored_file = app.state.answer_attachment_dir / attachment.storage_path
+    assert stored_file.is_file()
+
+    deleted = client.delete(f"/api/courses/{course['id']}")
+
+    assert deleted.status_code == 204
+    assert not stored_file.exists()
+
+
+def test_embedded_ai_workflow_and_learning_memory(
+    client: TestClient,
+    app: FastAPI,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    app.state.ai_service = FakeAiService()
+    monkeypatch.setattr(
+        api_module,
+        "extract_attachment_text",
+        lambda _path, _media_type: "手写答案：先列出条件，再完成计算。" + "甲" * 60_000,
+    )
     course, section, record = create_record(client)
 
     review = client.post(f"/api/daily-records/{record['id']}/ai-review/recall_review")
@@ -937,8 +1080,36 @@ def test_embedded_ai_workflow_and_learning_memory(client: TestClient, app: FastA
     assert exercise_body["format_version"] == 2
     assert len(exercise_body["items"]) == 12
     assert sum(item["item_type"] == "single_choice" for item in exercise_body["items"]) == 4
+    assert all(item["reference_answer_markdown"] == "" for item in exercise_body["items"])
+    assert "结合你的研究背景" in app.state.ai_service.codex.prompts[-1]
+    assert "至少同时改变以下维度中的 3 项" in app.state.ai_service.codex.prompts[-1]
     exercise_id = exercise_body["id"]
     assert client.delete(f"/api/exercises/{exercise_id}").status_code == 409
+    attachment_item = exercise_body["items"][4]
+    attachment_upload = client.post(
+        f"/api/exercise-items/{attachment_item['id']}/attachments",
+        files={
+            "file": (
+                "handwritten.png",
+                b"\x89PNG\r\n\x1a\n\x00\x00\x00\rIHDR"
+                + (100).to_bytes(4, "big")
+                + (100).to_bytes(4, "big"),
+                "image/png",
+            )
+        },
+    )
+    assert attachment_upload.status_code == 201
+    uploaded_attachment = attachment_upload.json()["items"][4]["response"]["attachments"][0]
+    assert uploaded_attachment["original_name"] == "handwritten.png"
+    assert uploaded_attachment["processing_status"] == "ready_truncated"
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        stored_attachment = session.get(
+            ExerciseResponseAttachment,
+            uploaded_attachment["id"],
+        )
+        assert stored_attachment is not None
+        assert len(stored_attachment.extracted_text) == 50_000
     for item in exercise_body["items"]:
         payload = (
             {
@@ -946,19 +1117,62 @@ def test_embedded_ai_workflow_and_learning_memory(client: TestClient, app: FastA
                 "answer_markdown": "",
             }
             if item["options"]
-            else {"selected_options": [], "answer_markdown": f"Answer {item['position']}"}
+            else {
+                "selected_options": [],
+                "answer_markdown": "" if item["position"] == 5 else f"Answer {item['position']}",
+            }
         )
         response = client.put(f"/api/exercise-items/{item['id']}/response", json=payload)
         assert response.status_code == 200
     assert client.post(f"/api/exercises/{exercise_id}/complete").status_code == 200
     grading = client.post(f"/api/exercises/{exercise_id}/ai-grade")
-    assert grading.status_code == 200
+    assert grading.status_code == 200, grading.text
     assert grading.json()["ai_feedback"] == ""
     assert all(item["response"]["status"] == "graded" for item in grading.json()["items"])
     assert all(item["response"]["score"] is None for item in grading.json()["items"])
     assert grading.json()["items"][0]["response"]["verdict"] == "incorrect"
     assert grading.json()["items"][1]["response"]["verdict"] == "correct"
+    assert grading.json()["items"][0]["reference_answer_markdown"] == (
+        "正确选项：A. Option A\n\nReference answer"
+    )
+    mistake = client.post(
+        f"/api/exercises/{exercise_id}/mistakes",
+        json={
+            "exercise_item_id": grading.json()["items"][0]["id"],
+            "error_content": "先核对选择条件",
+            "error_type": "concept",
+        },
+    )
+    assert mistake.status_code == 201
+    assert mistake.json()["original_question"] == "Question 1"
+    assert mistake.json()["user_answer"] == "选择：B"
+    assert mistake.json()["correct_approach"] == (
+        "正确选项：A. Option A\n\nReference answer"
+    )
+    assert mistake.json()["cause_analysis"] == ""
+    assert client.post(
+        f"/api/exercises/{exercise_id}/mistakes",
+        json={
+            "exercise_item_id": grading.json()["items"][0]["id"],
+            "error_content": "重复整理",
+            "error_type": "concept",
+        },
+    ).status_code == 409
+    assert client.post(
+        f"/api/exercises/{exercise_id}/mistakes",
+        json={
+            "exercise_item_id": grading.json()["items"][1]["id"],
+            "error_content": "正确题不应整理",
+            "error_type": "concept",
+        },
+    ).status_code == 422
     assert "本地选择题判定：incorrect" in app.state.ai_service.codex.prompts[-1]
+    assert "手写答案：先列出条件，再完成计算。" in app.state.ai_service.codex.prompts[-1]
+    deleted_attachment = client.delete(
+        f"/api/exercise-response-attachments/{uploaded_attachment['id']}"
+    )
+    assert deleted_attachment.status_code == 200
+    assert deleted_attachment.json()["items"][4]["response"]["attachments"] == []
     refreshed_record = client.get(f"/api/daily-records/{record['id']}").json()
     review_node = next(
         node for node in refreshed_record["workflow_nodes"] if node["node_key"] == "review"

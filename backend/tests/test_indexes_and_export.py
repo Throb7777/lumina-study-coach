@@ -94,6 +94,7 @@ def test_mistake_index_includes_course_chapter_and_section_context(
         {
             "id": record["mistake_id"],
             "exercise_id": 1,
+            "exercise_item_id": None,
             "daily_record_id": record["id"],
             "study_date": record["study_date"],
             "course_id": course["id"],

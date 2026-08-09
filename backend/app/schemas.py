@@ -11,6 +11,7 @@ from app.models import (
     ExerciseDifficulty,
     ExerciseItemType,
     ExerciseResponseStatus,
+    GuidedReflectionKind,
     MaterialRefreshStatus,
     MaterialSourceType,
     MaterialStatus,
@@ -236,14 +237,55 @@ class AiInteractionUpdate(BaseModel):
     feedback_text: str = Field(max_length=50000)
 
 
+class GuidedQuestionRead(BaseModel):
+    id: str
+    question_markdown: str
+    focus: str
+
+
+class GuidedQuestionReviewRead(BaseModel):
+    id: str
+    verdict: Literal["correct", "partial", "incorrect"]
+    feedback_markdown: str
+
+
+class GuidedReflectionRead(ORMModel):
+    id: int
+    daily_record_id: int
+    kind: GuidedReflectionKind
+    questions: list[GuidedQuestionRead]
+    answers: dict[str, str]
+    reviews: list[GuidedQuestionReviewRead] = Field(default_factory=list)
+    feedback_text: str
+
+
+class GuidedReflectionAnswersUpdate(BaseModel):
+    answers: dict[str, str]
+
+    @field_validator("answers")
+    @classmethod
+    def validate_answers(cls, value: dict[str, str]) -> dict[str, str]:
+        if len(value) > 3:
+            raise ValueError("最多保存 3 个定向问题的回答")
+        normalized: dict[str, str] = {}
+        for question_id, answer in value.items():
+            key = question_id.strip()
+            if not key:
+                raise ValueError("问题编号不能为空")
+            if len(answer) > 30000:
+                raise ValueError("单个回答不能超过 30000 个字符")
+            normalized[key] = answer
+        return normalized
+
+
 class MistakeCreate(BaseModel):
     exercise_item_id: int | None = Field(default=None, gt=0)
-    original_question: str = Field(min_length=1, max_length=50000)
+    original_question: str = Field(default="", max_length=50000)
     user_answer: str = Field(default="", max_length=50000)
     error_content: str = Field(min_length=1, max_length=50000)
     error_type: MistakeType
-    correct_approach: str = Field(min_length=1, max_length=50000)
-    cause_analysis: str = Field(min_length=1, max_length=50000)
+    correct_approach: str = Field(default="", max_length=50000)
+    cause_analysis: str = Field(default="", max_length=50000)
 
 
 class MistakeUpdate(BaseModel):
@@ -273,6 +315,7 @@ class MistakeRead(ORMModel):
 class MistakeIndexItem(BaseModel):
     id: int
     exercise_id: int
+    exercise_item_id: int | None
     daily_record_id: int
     study_date: date
     course_id: int
@@ -339,6 +382,14 @@ class ExerciseOption(BaseModel):
     label: str
 
 
+class ExerciseResponseAttachmentRead(ORMModel):
+    id: int
+    original_name: str
+    media_type: str
+    size_bytes: int
+    processing_status: str
+
+
 class ExerciseResponseRead(ORMModel):
     id: int
     exercise_item_id: int
@@ -348,6 +399,7 @@ class ExerciseResponseRead(ORMModel):
     verdict: str
     feedback_markdown: str
     score: int | None
+    attachments: list[ExerciseResponseAttachmentRead]
 
 
 class ExerciseItemRead(ORMModel):
@@ -358,6 +410,7 @@ class ExerciseItemRead(ORMModel):
     difficulty: ExerciseDifficulty
     stem_markdown: str
     options: list[ExerciseOption]
+    reference_answer_markdown: str
     source_refs: list[str]
     response: ExerciseResponseRead | None
 
@@ -412,11 +465,14 @@ class PreviewQuestionsUpdate(BaseModel):
     def strip_question(cls, value: str) -> str:
         value = value.strip()
         if not value:
-            raise ValueError("预习问题不能为空")
+            raise ValueError("下次回顾问题不能为空")
         return value
 
 
 class PreviousPreviewQuestions(BaseModel):
+    daily_record_id: int
+    section_id: int
+    section_title: str
     study_date: date
     questions: list[str]
 
@@ -428,6 +484,30 @@ class LocalSettingsRead(BaseModel):
     desktop_launch: bool = False
     semantic_search_enabled: bool = False
     semantic_search_model_ready: bool = False
+
+
+class BackupInspectRead(BaseModel):
+    token: str
+    created_at: str
+    format_version: int
+    file_count: int
+    total_size_bytes: int
+    includes_materials: bool
+    includes_attachments: bool
+    includes_notes: bool
+    requires_obsidian_vault: bool
+
+
+class BackupRestoreRequest(BaseModel):
+    token: str = Field(min_length=32, max_length=32, pattern=r"^[a-f0-9]{32}$")
+    obsidian_vault_path: str = Field(default="", max_length=2000)
+    confirm: bool
+
+
+class BackupRestoreRead(BaseModel):
+    token: str
+    status: str
+    detail: str = ""
 
 
 class OnboardingStatusRead(BaseModel):
@@ -802,6 +882,7 @@ class DailyRecordRead(BaseModel):
     workflow_nodes: list[WorkflowNodeRead]
     previous_records: list[DailyRecordSummary]
     ai_interactions: list[AiInteractionRead]
+    guided_reflections: list[GuidedReflectionRead] = Field(default_factory=list)
     exercises: list[ExerciseRead]
     preview_question_set: PreviewQuestionSetRead | None
     previous_preview_questions: PreviousPreviewQuestions | None
