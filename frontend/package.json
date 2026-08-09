@@ -16,7 +16,7 @@
     "@fontsource-variable/noto-sans-sc": "^5.2.10",
     "@fontsource-variable/nunito-sans": "^5.2.7",
     "katex": "^0.17.0",
-    "lucide-react": "^1.24.0",
+    "lucide-react": "^1.27.0",
     "react": "^19.2.7",
     "react-dom": "^19.2.7",
     "react-markdown": "^10.1.0",
