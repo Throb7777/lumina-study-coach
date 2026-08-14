@@ -589,6 +589,20 @@ def test_provider_model_option_parsers() -> None:
     ]
     assert slug_options[1].reasoning_efforts == ("low", "medium", "high")
 
+    current_cli_options = AntigravityCli.parse_model_options(
+        "\n".join(
+            [
+                "gemini-3.5-flash-high\tGemini 3.5 Flash (High)",
+                "gemini-3.5-flash-medium\tGemini 3.5 Flash (Medium)",
+                "gemini-3.5-flash-low\tGemini 3.5 Flash (Low)",
+                "claude-sonnet-4-6\tClaude Sonnet 4.6 (Thinking)",
+            ]
+        )
+    )
+    assert len(current_cli_options) == 1
+    assert current_cli_options[0].model == "Gemini 3.5 Flash"
+    assert current_cli_options[0].reasoning_efforts == ("low", "medium", "high")
+
 
 def test_learner_profile_and_completed_course_enter_later_context(
     client: TestClient,
@@ -908,6 +922,53 @@ def test_antigravity_status_keeps_login_when_preferred_model_is_unavailable(
     assert status.model_available is False
     assert status.account == "learner@example.com"
     assert "当前模型" in status.detail
+
+
+def test_antigravity_status_accepts_current_cli_model_columns(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    antigravity = AntigravityCli(tmp_path / "workspace")
+    antigravity.executable = "agy"
+
+    async def fake_run_command(*args: str, timeout: float = 30):
+        del timeout
+        if args == ("--version",):
+            return 0, "1.1.12", ""
+        return (
+            0,
+            "gemini-3.5-flash-high\tGemini 3.5 Flash (High)",
+            "I0000 applyAuthResult: email=learner@example.com, authMethod=consumer",
+        )
+
+    monkeypatch.setattr(antigravity, "_run_command", fake_run_command)
+    status = asyncio.run(antigravity.status())
+
+    assert status.connected is True
+    assert status.state == "connected"
+    assert status.model_available is True
+    assert status.account == "learner@example.com"
+
+
+def test_antigravity_status_accepts_legacy_model_display_name(
+    tmp_path,
+    monkeypatch,
+) -> None:
+    antigravity = AntigravityCli(tmp_path / "workspace")
+    antigravity.executable = "agy"
+
+    async def fake_run_command(*args: str, timeout: float = 30):
+        del timeout
+        if args == ("--version",):
+            return 0, "1.1.3", ""
+        return 0, "Gemini 3.5 Flash (High)", ""
+
+    monkeypatch.setattr(antigravity, "_run_command", fake_run_command)
+    status = asyncio.run(antigravity.status())
+
+    assert status.connected is True
+    assert status.state == "connected"
+    assert status.model_available is True
 
 
 def test_antigravity_account_parser_ignores_invalid_diagnostics() -> None:

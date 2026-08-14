@@ -712,10 +712,25 @@ class AntigravityCli:
                     log_path.unlink(missing_ok=True)
 
     @staticmethod
-    def parse_model_options(output: str) -> list[AiModelOption]:
-        grouped: dict[str, list[str]] = {}
+    def model_output_values(output: str) -> tuple[str, ...]:
+        values: list[str] = []
+        seen: set[str] = set()
         for raw_line in output.splitlines():
             line = re.sub(r"\x1b\[[0-9;]*m", "", raw_line).strip().lstrip("*-• ").strip()
+            if not line:
+                continue
+            for value in re.split(r"\t+|\s{2,}", line, maxsplit=1):
+                value = value.strip()
+                normalized = value.lower()
+                if value and normalized not in seen:
+                    values.append(value)
+                    seen.add(normalized)
+        return tuple(values)
+
+    @classmethod
+    def parse_model_options(cls, output: str) -> list[AiModelOption]:
+        grouped: dict[str, list[str]] = {}
+        for line in cls.model_output_values(output):
             match = re.fullmatch(r"(Gemini\s+.+?)\s*\((Low|Medium|High)\)", line, re.I)
             if not match:
                 slug_match = re.fullmatch(
@@ -754,6 +769,16 @@ class AntigravityCli:
             )
             for model, efforts in grouped.items()
         ]
+
+    @classmethod
+    def available_models(cls, output: str) -> set[str]:
+        available = {value.lower() for value in cls.model_output_values(output)}
+        for option in cls.parse_model_options(output):
+            available.update(
+                gemini_cli_model(option.model, effort).lower()
+                for effort in option.reasoning_efforts
+            )
+        return available
 
     async def model_options(self) -> list[AiModelOption]:
         code, stdout, stderr = await self._run_models()
@@ -799,11 +824,7 @@ class AntigravityCli:
             )
         version = version_stdout.splitlines()[0] if version_code == 0 else ""
         connected = models_code == 0
-        available_models = {
-            line.strip().lstrip("*-• ").strip().lower()
-            for line in models_stdout.splitlines()
-            if line.strip()
-        }
+        available_models = self.available_models(models_stdout)
         model_available = connected and selected_model.lower() in available_models
         account = self.account_from_diagnostics(models_stderr) if connected else ""
         if model_available:
@@ -899,11 +920,7 @@ class AntigravityCli:
                     last_error = "检查登录状态超时"
                     continue
                 if code == 0:
-                    available_models = {
-                        line.strip().lstrip("*-• ").strip().lower()
-                        for line in stdout.splitlines()
-                        if line.strip()
-                    }
+                    available_models = self.available_models(stdout)
                     model_available = self.model.lower() in available_models
                     detail = (
                         f"已连接 Antigravity · {self.model}"
