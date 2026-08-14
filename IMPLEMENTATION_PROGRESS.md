@@ -7,7 +7,7 @@
 - 项目阶段：第一版阶段 41，`v0.1.3` 已进入实际使用反馈修复阶段。
 - 当前目标：Antigravity CLI `1.1.12` 模型列表兼容修复已完成，继续收集 `v0.1.3` 实际使用反馈。
 - 最后更新时间：2026-08-14。
-- 当前结论：后端 118 项、启动器 33 项和前端 104 项测试全部通过；Antigravity CLI `1.1.12` 的双列模型输出和旧版单列输出均已覆盖。本机 `G:\Lumina` 已替换为修复后的 `0.1.3`，正式服务确认 `Gemini 3.5 Flash (High)` 可用，数据库、材料和安装配置哈希保持不变；本轮尚未提交、推送或更新公开 Release。
+- 当前结论：后端 118 项、启动器 33 项和前端 104 项测试全部通过；Antigravity CLI 的双列模型输出和旧版单列输出均已覆盖。本机 `G:\Lumina` 已替换为修复后的 `0.1.3`，正式服务确认 `Gemini 3.5 Flash (High)` 可用，数据库、材料和安装配置哈希保持不变；修复提交 `9766c4b` 已推送，`v0.1.3` 标签、英文说明和 5 个 Release 资产已刷新并完成远端摘要核对。
 
 ## 功能状态
 
@@ -32,21 +32,20 @@
 | 学习记忆 | `DONE` | 课程页可编辑用户维护的课程记忆，并查看独立自动课程脉络、章节记忆和小节记忆；每日完成由一次 Codex 调用生成紧凑摘要并同时更新小节和章节记忆，手动整理作为修复入口 | 三层记忆 API、AI 每日摘要、全部学习来源聚合、课程概览不覆盖、结构化生成和持久化测试通过 |
 | 设置 | `DONE` | 模型连接、Vault、字号、材料库和混合检索保持不变；新增完整备份下载、导入预检和桌面重启恢复，SQLite、材料、作答附件与受管笔记可迁移到新机器；Markdown 保留为独立内容导出 | 归档哈希/路径/数据库校验、旧版兼容、替换回滚、笔记冲突和跨机器 Vault 改绑由测试覆盖；设置页桌面与 390px 入口、预检弹窗和禁用边界已验收 |
 | Windows 安装与启动 | `DONE` | 安装包命名为 `install_Lumina-版本号.exe`，内部卸载组件位于 `uninstall_Lumina`；启动器校验健康接口与本机前端构建一致后用构建标识 URL 打开课程页，运行中卸载仍先等待 PID 对应服务完全退出 | 启动器 28 项测试覆盖构建匹配和 URL；QA 运行中卸载、用户文件边界、默认数据保留及生产安装器编译通过 |
-| 公开发布 | `DONE` | `v0.1.3` Public Preview 指向 `0b337f9`，包含 Windows 安装器、源码 ZIP、发布清单、CycloneDX SBOM 和 SHA-256 文件；`v0.1.2` 历史 Release 保留不变 | GitHub Actions `31290908882` 的 frontend 与 backend-and-launcher 成功；5 个远端资产的大小与 GitHub 返回的 SHA-256 digest 均与本地一致 |
+| 公开发布 | `DONE` | `v0.1.3` Public Preview 指向 `9766c4b`，包含 Windows 安装器、源码 ZIP、发布清单、CycloneDX SBOM 和 SHA-256 文件；`v0.1.2` 历史 Release 保留不变 | GitHub Actions `31767280194` 和 `31767329766` 均成功；5 个远端资产的大小与 GitHub 返回的 SHA-256 digest 均与本地一致 |
 
 ## 当前正在进行
 
-- 当前任务：Antigravity CLI `1.1.12` 模型列表兼容修复、测试、Windows 打包和本机程序替换已完成。
-- 最近完成：修复后的正式服务在 `127.0.0.1:8000` 报告 `0.1.3`、前端就绪，Google 账号已连接，`Gemini 3.5 Flash / high` 为可用状态并返回 4 组 Gemini 模型。
-- 本轮范围：只修改 Antigravity 模型输出解析、状态判断、对应测试和本进度文档；未新增生产依赖、数据库迁移或前端变更，未执行安装器升级、备份恢复、真实模型内容生成、提交、推送或 Release 更新。
-- 验收结论：替换前后正式数据库与 15 个材料/附件文件共 16 项的大小和 SHA-256 逐项一致，`install-config.json` 哈希一致；最终 `G:\Lumina\Lumina.exe` 与构建产物 SHA-256 均为 `8697954A4178ACF9B66A242328B958DBC9F221C537FAD7059F2DDA762AF80770`。
+- 当前任务：Antigravity 模型列表兼容修复、测试、本机替换和 `v0.1.3` 同版本 Release 刷新已完成。
+- 最近完成：最终自包含 EXE 在隔离数据目录实际连接 Antigravity CLI `1.1.13`，Google 账号已连接，`Gemini 3.5 Flash / high` 为可用状态并返回 4 组 Gemini 模型；内置 OCR 返回 `eng/chi_sim/chi_sim_vert`。
+- 本轮范围：只修改 Antigravity 模型输出解析、状态判断、对应测试和本进度文档；未新增生产依赖、数据库迁移或前端变更，未执行安装器升级、备份恢复或真实模型内容生成。运行、测试和构建产生的依赖、缓存、临时数据与隔离服务目录均已清理，正式学习数据未进入清理范围。
+- 验收结论：替换前后正式数据库与 15 个材料/附件文件共 16 项的大小和 SHA-256 逐项一致，`install-config.json` 哈希一致；已安装 EXE SHA-256 为 `8697954A4178ACF9B66A242328B958DBC9F221C537FAD7059F2DDA762AF80770`。公开安装器 SHA-256 为 `AFD47EA99A4E0BB6C44C33350BE9A75CE870CDF3930F74B77EF8CA9E1B5F8736`，其中自包含 EXE SHA-256 为 `B264E15FE11E0A90F07910B3A53BA30E61FB9A2FCE257BE9DE71333752304D13`。
 
 ## 下一步
 
-1. 确认本轮 Antigravity 兼容修复后再决定是否提交、推送并刷新 `v0.1.3` Release 资产。
-2. 通过 GitHub Issues 收集 `v0.1.3` 的安装、备份恢复、练习附件和学习流程使用反馈。
-3. 后续公开版本优先配置可信 Windows 代码签名，消除 SmartScreen 未知发布者提示。
-4. 只在确认真实需求或缺陷后进入下一阶段，不扩大第一版范围。
+1. 通过 GitHub Issues 收集 `v0.1.3` 的安装、备份恢复、练习附件和学习流程使用反馈。
+2. 后续公开版本优先配置可信 Windows 代码签名，消除 SmartScreen 未知发布者提示。
+3. 只在确认真实需求或缺陷后进入下一阶段，不扩大第一版范围。
 
 ## 阻塞与待确认
 
@@ -890,6 +889,6 @@
 
 - 根因与修复：`agy models` 从旧版单列输出变为 `模型 ID + Tab + 显示名` 双列输出后，原解析器的整行 `fullmatch` 和状态精确比较把全部模型过滤为空。后端现按列提取模型 ID 与显示名，并从解析出的模型/强度生成等价 CLI ID；模型选项、连接状态和登录完成检查共用同一兼容逻辑，旧版单列显示名和单列 ID 继续支持。
 - 自动化验证：新增 CLI `1.1.12` 双列解析、双列首选模型可用和旧版显示名可用回归；聚焦测试通过，完整 Ruff 通过，后端为 `118 passed`。启动器 `33 passed`，前端 `npm run check` 通过 ESLint、TypeScript、`9` 个测试文件的 `104 passed` 和 Vite `8.1.4` 生产构建；uv 锁检查、空库升级到 `20260808_0016`、`alembic check` 和发布元数据检查通过。
-- 实际与打包验收：修复后的源码和自包含 EXE 均实际调用本机 Antigravity CLI `1.1.12`；账号 `yanyu020816@gmail.com` 返回 4 组 Gemini 模型，首选 `Gemini 3.5 Flash / high` 状态为 `connected` 且 `model_available=true`。PyInstaller 与 Inno Setup 6.7.3 完整构建成功，最终安装器 SHA-256 为 `C78036DCE92772A8E2E61E00A39B49BFAC81F187E121C357151576F946D3A6B0`。
+- 实际与打包验收：修复后的源码在 Antigravity CLI `1.1.12`、最终自包含 EXE 在自动更新后的 `1.1.13` 均通过实际调用；账号 `yanyu020816@gmail.com` 返回 4 组 Gemini 模型，首选 `Gemini 3.5 Flash / high` 状态为 `connected` 且 `model_available=true`。PyInstaller 与 Inno Setup 6.7.3 完整构建成功，公开安装器 SHA-256 为 `AFD47EA99A4E0BB6C44C33350BE9A75CE870CDF3930F74B77EF8CA9E1B5F8736`。
 - 本机替换与数据边界：未运行安装器，正常停止服务后只覆盖 `G:\Lumina` 程序文件，保留现有安装配置和卸载组件。最终 EXE 版本为 `0.1.3`，SHA-256 为 `8697954A4178ACF9B66A242328B958DBC9F221C537FAD7059F2DDA762AF80770`；正式服务重新启动后健康、前端就绪且 Gemini 状态正确。
-- 数据验证与限制：替换前后正式数据库、材料和作答附件目标共 16 个文件的路径、大小和 SHA-256 逐项一致，`install-config.json` 哈希一致；未读取或修改 Obsidian Vault，未执行数据库迁移、备份恢复或真实 Gemini 内容生成。本轮未提交、推送或更新 GitHub Release。
+- 数据验证与发布：替换前后正式数据库、材料和作答附件目标共 16 个文件的路径、大小和 SHA-256 逐项一致，`install-config.json` 哈希一致；未读取或修改 Obsidian Vault，未执行数据库迁移、备份恢复或真实 Gemini 内容生成。修复提交 `9766c4b` 已推送到 `main`，同一 `v0.1.3` 标签已移动到该提交；GitHub Actions `31767280194` 和 `31767329766` 均成功，Release 5 个资产的大小和 digest 与本地逐项一致。
