@@ -21,7 +21,7 @@ dependencies = [
 [dependency-groups]
 dev = [
     # Starlette TestClient uses HTTPX2 when available and deprecates the legacy HTTPX path.
-    "httpx2>=2.7.0",
+    "httpx2>=2.10.0",
     "pyinstaller>=6.16,<7",
     "pytest>=9,<10",
     "ruff>=0.15,<0.16",
