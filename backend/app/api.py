@@ -1505,7 +1505,7 @@ async def run_section_note_background(
         except Exception as error:
             session.expire_all()
             stored = session.get(AiRun, run_id)
-            if stored is not None and stored.status == AiRunStatus.RUNNING:
+            if stored is not None and stored.status != AiRunStatus.FAILED:
                 stored.status = AiRunStatus.FAILED
                 stored.error_text = str(error) or "笔记生成失败"
                 session.commit()
@@ -1573,11 +1573,18 @@ def ai_run_result(run_id: int, session: SessionDependency) -> AiRunResultRead:
     generated: AiGeneratedTextRead | None = None
     if run.status == AiRunStatus.COMPLETED:
         try:
+            normalized_output = normalize_ai_markdown(run.output_text)
+        except ValueError as error:
+            raise HTTPException(
+                status_code=422,
+                detail=f"生成任务结果格式异常：{error}",
+            ) from error
+        try:
             references = json.loads(run.source_refs_json or "[]")
         except json.JSONDecodeError:
             references = []
         generated = AiGeneratedTextRead(
-            text=normalize_ai_markdown(run.output_text),
+            text=normalized_output,
             provider=run.provider.value,
             model=run.model,
             context_snapshot=run.context_snapshot,

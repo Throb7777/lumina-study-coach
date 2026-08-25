@@ -9,6 +9,7 @@ FENCE_LINE = re.compile(r"^\s*(`{3,}|~{3,})")
 LIST_DISPLAY_START = re.compile(r"^(?P<indent>\s*)(?P<marker>(?:[-+*]|\d+[.)]))\s+\\\[\s*$")
 INLINE_DISPLAY_MATH = re.compile(r"\\\[(?P<body>[^\n]+?)\\\]")
 BROKEN_LATEX_ESCAPES = (
+    (re.compile(r"\x7f(?=\\[A-Za-z]+)"), ""),
     (re.compile(r"\x07omega\b"), "\\omega"),
     (re.compile(r"\x07(?=(?:cdots|dots)\b)"), "\\"),
     (re.compile(r"\x07(?=(?:lpha|ngle|pprox|st)\b)"), "\\a"),

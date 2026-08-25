@@ -84,10 +84,48 @@ def test_ai_run_can_be_cancelled_and_retried_from_the_original_action(
     assert client.post(f"/api/ai-runs/{run_id}/cancel").status_code == 409
 
 
+def test_ai_run_result_recovers_safe_legacy_controls_and_reports_unknown_ones(
+    client: TestClient, app: FastAPI
+) -> None:
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        recoverable = AiRun(
+            provider=AiProvider.CODEX,
+            task=AiRunTask.SECTION_NOTE_DRAFT,
+            status=AiRunStatus.COMPLETED,
+            context_snapshot="context",
+            prompt_text="prompt",
+            output_text="$\x7f\\sigma$ 与随机变量使用相同单位",
+            source_refs_json="[]",
+        )
+        unknown = AiRun(
+            provider=AiProvider.CODEX,
+            task=AiRunTask.SECTION_NOTE_DRAFT,
+            status=AiRunStatus.COMPLETED,
+            context_snapshot="context",
+            prompt_text="prompt",
+            output_text="正文\x01内容",
+            source_refs_json="[]",
+        )
+        session.add_all([recoverable, unknown])
+        session.commit()
+        recoverable_id = recoverable.id
+        unknown_id = unknown.id
+
+    recovered = client.get(f"/api/ai-runs/{recoverable_id}/result")
+    assert recovered.status_code == 200
+    assert recovered.json()["result"]["text"] == r"$\sigma$ 与随机变量使用相同单位"
+
+    rejected = client.get(f"/api/ai-runs/{unknown_id}/result")
+    assert rejected.status_code == 422
+    assert "U+0001" in rejected.json()["detail"]
+
+
 class FakeCodex:
     def __init__(self) -> None:
         self.prompts: list[str] = []
         self.last_options: dict = {}
+        self.display_markdown = "AI 生成结果"
 
     async def login(self) -> dict[str, str]:
         return {"auth_url": "https://example.test/login", "login_id": "login-1"}
@@ -215,7 +253,7 @@ class FakeCodex:
         elif "display_markdown" in properties:
             text = json.dumps(
                 {
-                    "display_markdown": "AI 生成结果",
+                    "display_markdown": self.display_markdown,
                     "handoff": handoff,
                 },
                 ensure_ascii=False,
@@ -1252,6 +1290,7 @@ def test_embedded_ai_workflow_and_learning_memory(
         json={"existing_content": "已有内容", "mode": "revise"},
     )
     assert note.json()["text"] == "AI 生成结果"
+    app.state.ai_service.codex.display_markdown = "$\x7f\\sigma$ 与随机变量使用相同单位"
     background_run = client.post(
         f"/api/daily-records/{record['id']}/ai-section-note-runs",
         json={"existing_content": "已有内容", "mode": "revise"},
@@ -1264,7 +1303,24 @@ def test_embedded_ai_workflow_and_learning_memory(
             break
         asyncio.run(asyncio.sleep(0.01))
     assert background_result.json()["run"]["status"] == "completed"
-    assert background_result.json()["result"]["text"] == "AI 生成结果"
+    assert background_result.json()["result"]["text"] == r"$\sigma$ 与随机变量使用相同单位"
+
+    app.state.ai_service.codex.display_markdown = "正文\x01内容"
+    invalid_background_run = client.post(
+        f"/api/daily-records/{record['id']}/ai-section-note-runs",
+        json={"existing_content": "已有内容", "mode": "revise"},
+    )
+    assert invalid_background_run.status_code == 202
+    invalid_run_id = invalid_background_run.json()["id"]
+    for _ in range(40):
+        invalid_background_result = client.get(f"/api/ai-runs/{invalid_run_id}/result")
+        if invalid_background_result.json()["run"]["status"] != "running":
+            break
+        asyncio.run(asyncio.sleep(0.01))
+    assert invalid_background_result.json()["run"]["status"] == "failed"
+    assert "U+0001" in invalid_background_result.json()["run"]["error_text"]
+    assert invalid_background_result.json()["result"] is None
+    app.state.ai_service.codex.display_markdown = "AI 生成结果"
     polished = client.post(
         f"/api/sections/{section['id']}/ai-polish-note",
         json={"content": "# 原始笔记"},

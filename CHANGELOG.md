@@ -24,6 +24,9 @@ All notable public changes to Lumina are documented in this file.
   consistently across summaries, notes, practice, and mistake review.
 - Keep unrelated study controls usable while an AI task is running and dismiss
   transient generation confirmations automatically.
+- Recover completed section-note drafts when safe malformed LaTeX control
+  characters are present, stop unrecoverable result polling, and provide an
+  explicit retry action for the saved generation run.
 
 ### Changed
 
@@ -32,6 +35,12 @@ All notable public changes to Lumina are documented in this file.
 - Auto-collapse course study history after navigation and completion.
 - Remove internal material references and grading evidence from learner-facing
   notes and practice feedback, and standardise related action sizes.
+
+### Notes
+
+- The v0.1.3 Windows assets were refreshed on 2026-08-25 with the section-note
+  result recovery fix. The version number remains unchanged and existing local
+  learning data is preserved during an upgrade.
 
 ## [0.1.2] - 2026-07-28
 

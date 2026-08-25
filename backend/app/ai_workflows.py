@@ -931,7 +931,7 @@ async def run_codex(
                 )
             display_markdown = payload.get("display_markdown")
             if isinstance(display_markdown, str):
-                result.text = display_markdown
+                result.text = normalize_ai_markdown(display_markdown)
     except asyncio.CancelledError:
         run.status = AiRunStatus.FAILED
         run.error_text = "生成任务已取消，可从原操作重新生成。"
@@ -989,12 +989,18 @@ async def run_gemini(
         ACTIVE_AI_TASKS[run.id] = current_task
     try:
         result = await ai_service.gemini.generate(prompt, selected_model)
+        result.text = normalize_ai_markdown(result.text)
     except asyncio.CancelledError:
         run.status = AiRunStatus.FAILED
         run.error_text = "生成任务已取消，可从原操作重新生成。"
         session.commit()
         raise
     except AiProviderError as error:
+        run.status = AiRunStatus.FAILED
+        run.error_text = str(error)
+        session.commit()
+        raise
+    except Exception as error:
         run.status = AiRunStatus.FAILED
         run.error_text = str(error)
         session.commit()

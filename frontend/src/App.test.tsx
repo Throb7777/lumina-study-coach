@@ -2383,6 +2383,66 @@ describe('App', () => {
     }))
   })
 
+  it('stops a failed note-result poll and lets the user retry the saved run', async () => {
+    const openedNote = {
+      section_id: 1,
+      file_name: '条件概率.md',
+      relative_path: '概率论/第一章/条件概率.md',
+      content: '',
+      modified_at_ns: null,
+    }
+    const completedRun = {
+      id: 41,
+      provider: 'codex',
+      task: 'section_note_draft',
+      status: 'completed',
+      course_id: 1,
+      section_id: 1,
+      daily_record_id: 1,
+      exercise_id: null,
+      model: 'gpt-5.5',
+      reasoning_effort: 'medium',
+      error_text: '',
+      created_at: '2026-08-25T03:56:48Z',
+      updated_at: '2026-08-25T04:00:02Z',
+    }
+    const generatedText = '# 条件概率\n\n分母必须非零。'
+    localStorage.setItem('section-note-1-active-run', '41')
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse(dailyRecord))
+      .mockImplementationOnce(() => jsonResponse(openedNote))
+      .mockImplementationOnce(() => new Response('Internal Server Error', { status: 500 }))
+      .mockImplementationOnce(() => jsonResponse({
+        run: completedRun,
+        result: {
+          text: generatedText,
+          provider: 'codex',
+          model: 'gpt-5.5',
+          context_snapshot: 'context',
+          source_refs: [],
+          material_revision: 1,
+          material_manifest_hash: 'manifest',
+        },
+      }))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1/note'])
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      '暂时无法读取笔记生成结果，任务记录仍已保留。请重新读取结果。',
+    )
+    expect(screen.getByRole('button', { name: '已有待恢复结果' })).toBeDisabled()
+    expect(screen.queryByRole('button', { name: '生成中' })).not.toBeInTheDocument()
+    expect(localStorage.getItem('section-note-1-active-run')).toBe('41')
+
+    await user.click(screen.getByRole('button', { name: '重新读取结果' }))
+
+    const dialog = await screen.findByRole('dialog', { name: '预览笔记初稿' })
+    expect(within(dialog).getByRole('heading', { name: '条件概率' })).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(4)
+  })
+
   it('asks before completing a section note whose body is unfinished', async () => {
     const openedNote = {
       section_id: 1,

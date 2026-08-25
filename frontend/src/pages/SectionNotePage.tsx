@@ -41,6 +41,7 @@ export function SectionNotePage() {
     const stored = Number(window.localStorage.getItem(noteRunKey))
     return run?.id ?? (Number.isInteger(stored) && stored > 0 ? stored : null)
   })
+  const [draftResultLoading, setDraftResultLoading] = useState(pendingDraftRunId !== null)
   const [mobileView, setMobileView] = useState<'edit' | 'preview'>('edit')
   const [vaultMissing] = useState(routeData.vaultMissing)
   const [overwriteOpen, setOverwriteOpen] = useState(false)
@@ -86,7 +87,7 @@ export function SectionNotePage() {
   }, [noteRunKey, pendingDraftRunId])
 
   useEffect(() => {
-    if (!pendingDraftRunId || pendingDraft) return
+    if (!pendingDraftRunId || pendingDraft || !draftResultLoading) return
     let disposed = false
     let timer = 0
     const controller = new AbortController()
@@ -96,11 +97,13 @@ export function SectionNotePage() {
         if (disposed) return
         setActiveServerRun(payload.run.status === 'running' ? payload.run : null)
         if (payload.run.status === 'completed' && payload.result) {
+          setDraftResultLoading(false)
           setPendingDraft(payload.result)
           setNotice('笔记初稿已生成，请检查后应用')
           return
         }
         if (payload.run.status === 'failed') {
+          setDraftResultLoading(false)
           setError(payload.run.error_text || '生成笔记初稿失败')
           setPendingDraftRunId(null)
           return
@@ -109,10 +112,13 @@ export function SectionNotePage() {
       } catch (requestError) {
         if (!disposed) {
           if (requestError instanceof ApiError && requestError.status === 404) {
+            setDraftResultLoading(false)
             setError('笔记生成任务不存在，请重新生成')
             setPendingDraftRunId(null)
           } else {
-            timer = window.setTimeout(pollResult, 5000)
+            setDraftResultLoading(false)
+            setActiveServerRun(null)
+            setError('暂时无法读取笔记生成结果，任务记录仍已保留。请重新读取结果。')
           }
         }
       }
@@ -123,7 +129,13 @@ export function SectionNotePage() {
       controller.abort()
       window.clearTimeout(timer)
     }
-  }, [pendingDraft, pendingDraftRunId, setNotice])
+  }, [draftResultLoading, pendingDraft, pendingDraftRunId, setNotice])
+
+  function retryDraftResult() {
+    if (!pendingDraftRunId) return
+    setError('')
+    setDraftResultLoading(true)
+  }
 
   async function cancelActiveAiTask() {
     if (!activeServerRun) return
@@ -131,6 +143,7 @@ export function SectionNotePage() {
       await api.cancelAiRun(activeServerRun.id)
       setActiveServerRun(null)
       setActiveAiTask('')
+      setDraftResultLoading(false)
       setPendingDraftRunId(null)
       setNotice('生成任务已取消，可以从原操作重新生成')
     } catch (requestError) {
@@ -183,6 +196,7 @@ export function SectionNotePage() {
       const run = await api.startAiSectionNote(record.id, content, mode)
       setActiveServerRun(run)
       setPendingDraftRunId(run.id)
+      setDraftResultLoading(true)
     } catch (requestError) {
       setError(requestError instanceof Error ? requestError.message : '生成笔记初稿失败')
     } finally {
@@ -320,10 +334,10 @@ export function SectionNotePage() {
         />
         {error && <p className="error-banner" role="alert">{error}</p>}
         {notice && <p className="notice-banner" role="status">{notice}</p>}
-        {(activeAiTask || activeServerRun) && (
+        {(activeAiTask || activeServerRun || draftResultLoading) && (
           <AiTaskStatus
             key={activeAiTask || activeServerRun?.id}
-            label={activeAiTask || '正在继续上次的笔记任务'}
+            label={activeAiTask || (activeServerRun ? '正在继续上次的笔记任务' : '正在读取笔记生成结果')}
             phase={activeServerRun?.task === 'material_context'
               ? '正在完整读取本节材料'
               : `正在等待 ${activeServerRun?.provider === 'gemini' ? 'Gemini' : 'Codex'} 生成结果`}
@@ -336,7 +350,10 @@ export function SectionNotePage() {
         {record && (
           <section className="note-prompt-panel">
             <div className="note-ai-actions">
-              <button className="primary-button" type="button" disabled={busy || pendingDraftRunId !== null} onClick={generateDraft}><Sparkles size={15} />{pendingDraftRunId !== null || activeAiTask === '正在生成笔记初稿' ? '生成中' : content.trim() ? 'GPT 修订笔记' : 'GPT 生成初稿'}</button>
+              <button className="primary-button" type="button" disabled={busy || pendingDraftRunId !== null} onClick={generateDraft}><Sparkles size={15} />{draftResultLoading || activeAiTask === '正在生成笔记初稿' ? '生成中' : pendingDraftRunId !== null ? '已有待恢复结果' : content.trim() ? 'GPT 修订笔记' : 'GPT 生成初稿'}</button>
+              {pendingDraftRunId !== null && !draftResultLoading && pendingDraft === null && (
+                <button className="secondary-button" type="button" disabled={busy} onClick={retryDraftResult}>重新读取结果</button>
+              )}
               <button className="secondary-button" type="button" disabled={busy || !content.trim()} onClick={polishDraft}><Sparkles size={15} />{activeAiTask === '正在润色笔记' ? '润色中' : 'Gemini 润色'}</button>
               <button className="text-button" type="button" disabled={busy} onClick={generatePrompt}>{record.section_note_prompt ? '更新手动提示词' : '查看手动提示词'}</button>
             </div>

@@ -89,6 +89,12 @@ def test_repairs_json_control_characters_inside_common_latex_commands() -> None:
     )
 
 
+def test_repairs_delete_character_before_latex_commands() -> None:
+    source = "$\x7f\\sigma$ 与随机变量 $X$ 使用相同单位"
+
+    assert normalize_ai_markdown(source) == r"$\sigma$ 与随机变量 $X$ 使用相同单位"
+
+
 def test_normalizes_html_breaks_outside_code_fences() -> None:
     source = "第一行<br>第二行\n\n```html\n<br>\n```"
 
