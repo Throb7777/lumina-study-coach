@@ -41,9 +41,10 @@ All notable public changes to Lumina are documented in this file.
 
 ### Notes
 
-- The v0.1.3 Windows assets were refreshed on 2026-08-25 with the section-note
-  result recovery fix. The version number remains unchanged and existing local
-  learning data is preserved during an upgrade.
+- The v0.1.3 Windows assets were refreshed on 2026-08-25 for section-note
+  recovery and again on 2026-08-26 for exercise-grading recovery. The version
+  number remains unchanged and existing local learning data is preserved
+  during an upgrade.
 
 ## [0.1.2] - 2026-07-28
 
