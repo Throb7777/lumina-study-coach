@@ -27,6 +27,9 @@ All notable public changes to Lumina are documented in this file.
 - Recover completed section-note drafts when safe malformed LaTeX control
   characters are present, stop unrecoverable result polling, and provide an
   explicit retry action for the saved generation run.
+- Validate and normalise every per-question grading feedback item before an AI
+  run is marked complete, repair malformed LaTeX symbol escapes, and reuse an
+  exact matching completed grading result after a post-processing failure.
 
 ### Changed
 

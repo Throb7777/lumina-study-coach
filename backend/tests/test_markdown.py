@@ -95,6 +95,12 @@ def test_repairs_delete_character_before_latex_commands() -> None:
     assert normalize_ai_markdown(source) == r"$\sigma$ 与随机变量 $X$ 使用相同单位"
 
 
+def test_repairs_delete_character_before_latex_symbol_escapes() -> None:
+    source = "$\x7f\\{X>t+s\\}$"
+
+    assert normalize_ai_markdown(source) == r"$\{X>t+s\}$"
+
+
 def test_normalizes_html_breaks_outside_code_fences() -> None:
     source = "第一行<br>第二行\n\n```html\n<br>\n```"
 

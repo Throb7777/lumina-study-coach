@@ -5,7 +5,7 @@ import time
 from contextlib import suppress
 from datetime import date, datetime
 from pathlib import Path, PurePosixPath
-from typing import Annotated
+from typing import Annotated, Any
 from uuid import uuid4
 
 from fastapi import (
@@ -712,6 +712,41 @@ def ai_http_error(error: AiProviderError) -> HTTPException:
     return HTTPException(status_code=code, detail=detail)
 
 
+def reusable_grading_payload(
+    session: Session,
+    exercise: Exercise,
+    prompt: str,
+    expected_positions: set[int],
+) -> dict[str, Any] | None:
+    if exercise.status != "submitted":
+        return None
+    preference = codex_preference(session)
+    candidates = session.scalars(
+        select(AiRun)
+        .where(
+            AiRun.provider == AiProvider.CODEX,
+            AiRun.task == AiRunTask.EXERCISE_GRADING,
+            AiRun.status == AiRunStatus.COMPLETED,
+            AiRun.exercise_id == exercise.id,
+            AiRun.prompt_text == prompt,
+            AiRun.model == preference.model,
+            AiRun.reasoning_effort == preference.reasoning_effort,
+            AiRun.output_text != "",
+        )
+        .order_by(AiRun.id.desc())
+        .limit(5)
+    )
+    validator = grading_output_validator(expected_positions)
+    for candidate in candidates:
+        try:
+            payload = parse_structured_output(candidate.output_text)
+            validator(payload)
+        except AiProviderError:
+            continue
+        return payload
+    return None
+
+
 @router.get("/ai/providers", response_model=list[AiProviderStatusRead])
 async def get_ai_providers(
     session: SessionDependency,
@@ -1305,32 +1340,40 @@ async def generate_ai_grading(
         session, ai_service, record, AiRunTask.EXERCISE_GRADING
     )
     prompt = f"{memory_context}\n\n{grading_prompt(record, exercise)}"
-    try:
-        result = await run_codex(
-            session,
-            ai_service,
-            task=AiRunTask.EXERCISE_GRADING,
-            prompt=prompt,
-            context_snapshot=memory_context,
-            course_id=record.section.chapter.course_id,
-            section_id=record.section_id,
-            daily_record_id=record.id,
-            exercise_id=exercise.id,
-            output_schema=GRADING_OUTPUT_SCHEMA if structured else TEXT_OUTPUT_SCHEMA,
-            source_refs=source_refs,
-            material_context_session=material_context,
-            payload_validator=(
-                grading_output_validator({item.position for item in exercise.items})
-                if structured
-                else None
-            ),
-        )
-    except AiProviderError as error:
-        raise ai_http_error(error) from error
-    exercise.grading_prompt = prompt
-    exercise.ai_feedback = "" if structured else normalize_ai_markdown(result.text)
+    expected_positions = {item.position for item in exercise.items}
+    recovered_payload = (
+        reusable_grading_payload(session, exercise, prompt, expected_positions)
+        if structured
+        else None
+    )
+    if recovered_payload is None:
+        try:
+            result = await run_codex(
+                session,
+                ai_service,
+                task=AiRunTask.EXERCISE_GRADING,
+                prompt=prompt,
+                context_snapshot=memory_context,
+                course_id=record.section.chapter.course_id,
+                section_id=record.section_id,
+                daily_record_id=record.id,
+                exercise_id=exercise.id,
+                output_schema=GRADING_OUTPUT_SCHEMA if structured else TEXT_OUTPUT_SCHEMA,
+                source_refs=source_refs,
+                material_context_session=material_context,
+                payload_validator=(
+                    grading_output_validator(expected_positions) if structured else None
+                ),
+            )
+        except AiProviderError as error:
+            raise ai_http_error(error) from error
+        payload = result.payload if structured else None
+    else:
+        payload = recovered_payload
     if structured:
-        payload = result.payload or parse_structured_output(result.text)
+        if payload is None:
+            raise RuntimeError("validated grading result is missing")
+        exercise.ai_feedback = ""
         results = payload.get("results")
         by_position = {
             int(item["position"]): item for item in results if isinstance(item, dict)
@@ -1354,6 +1397,9 @@ async def generate_ai_grading(
         )
         if review_node is not None:
             review_node.status = WorkflowNodeStatus.PENDING
+    else:
+        exercise.ai_feedback = normalize_ai_markdown(result.text)
+    exercise.grading_prompt = prompt
     session.commit()
     return exercise
 

@@ -6,6 +6,7 @@ from pathlib import Path
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+from sqlalchemy import select
 from sqlalchemy.orm import Session, sessionmaker
 
 import app.ai_providers as ai_providers_module
@@ -31,7 +32,9 @@ from app.models import (
     AiRun,
     AiRunStatus,
     AiRunTask,
+    Exercise,
     ExerciseResponseAttachment,
+    ExerciseResponseStatus,
 )
 
 
@@ -126,6 +129,7 @@ class FakeCodex:
         self.prompts: list[str] = []
         self.last_options: dict = {}
         self.display_markdown = "AI 生成结果"
+        self.grading_feedback_markdown = "Answer accepted."
 
     async def login(self) -> dict[str, str]:
         return {"auth_url": "https://example.test/login", "login_id": "login-1"}
@@ -206,7 +210,7 @@ class FakeCodex:
                         {
                             "position": position,
                             "verdict": "correct",
-                            "feedback_markdown": "Answer accepted.",
+                            "feedback_markdown": self.grading_feedback_markdown,
                         }
                         for position in range(1, 13)
                     ],
@@ -375,6 +379,140 @@ def create_record(client: TestClient) -> tuple[dict, dict, dict]:
         },
     )
     return course, section, record
+
+
+def create_submitted_structured_exercise(
+    client: TestClient,
+    app: FastAPI,
+) -> tuple[FakeAiService, dict]:
+    ai_service = FakeAiService()
+    app.state.ai_service = ai_service
+    _course, _section, record = create_record(client)
+    generated = client.post(f"/api/daily-records/{record['id']}/ai-practice")
+    assert generated.status_code == 201, generated.text
+    exercise = generated.json()
+    for item in exercise["items"]:
+        payload = (
+            {"selected_options": ["A"], "answer_markdown": ""}
+            if item["options"]
+            else {
+                "selected_options": [],
+                "answer_markdown": f"Answer {item['position']}",
+            }
+        )
+        response = client.put(f"/api/exercise-items/{item['id']}/response", json=payload)
+        assert response.status_code == 200, response.text
+    completed = client.post(f"/api/exercises/{exercise['id']}/complete")
+    assert completed.status_code == 200, completed.text
+    return ai_service, completed.json()
+
+
+def test_grading_repairs_delete_character_before_latex_symbol_escape(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    ai_service, exercise = create_submitted_structured_exercise(client, app)
+    ai_service.codex.grading_feedback_markdown = "$\x7f\\{X>t+s\\}$"
+
+    grading = client.post(f"/api/exercises/{exercise['id']}/ai-grade")
+
+    assert grading.status_code == 200, grading.text
+    assert all(
+        item["response"]["feedback_markdown"] == r"$\{X>t+s\}$"
+        for item in grading.json()["items"]
+    )
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        run = session.scalar(
+            select(AiRun)
+            .where(
+                AiRun.exercise_id == exercise["id"],
+                AiRun.task == AiRunTask.EXERCISE_GRADING,
+            )
+            .order_by(AiRun.id.desc())
+        )
+        assert run is not None
+        assert run.status == AiRunStatus.COMPLETED
+
+
+def test_grading_rejects_unknown_controls_without_partially_grading(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    ai_service, exercise = create_submitted_structured_exercise(client, app)
+    ai_service.codex.grading_feedback_markdown = "反馈\x01内容"
+
+    grading = client.post(f"/api/exercises/{exercise['id']}/ai-grade")
+
+    assert grading.status_code == 502
+    assert "U+0001" in grading.json()["detail"]
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        persisted = session.get(Exercise, exercise["id"])
+        assert persisted is not None
+        assert persisted.status == "submitted"
+        assert all(
+            item.response is not None
+            and item.response.status == ExerciseResponseStatus.SUBMITTED
+            for item in persisted.items
+        )
+        assert all(
+            item.response is not None and not item.response.feedback_markdown
+            for item in persisted.items
+        )
+        run = session.scalar(
+            select(AiRun)
+            .where(
+                AiRun.exercise_id == exercise["id"],
+                AiRun.task == AiRunTask.EXERCISE_GRADING,
+            )
+            .order_by(AiRun.id.desc())
+        )
+        assert run is not None
+        assert run.status == AiRunStatus.FAILED
+        assert "U+0001" in run.error_text
+
+
+def test_grading_reuses_matching_completed_result_after_write_failure(
+    client: TestClient,
+    app: FastAPI,
+) -> None:
+    ai_service, exercise_body = create_submitted_structured_exercise(client, app)
+    exercise_id = exercise_body["id"]
+    first_grading = client.post(f"/api/exercises/{exercise_id}/ai-grade")
+    assert first_grading.status_code == 200, first_grading.text
+    grading_calls = len(ai_service.codex.prompts)
+
+    session_factory: sessionmaker[Session] = app.state.session_factory
+    with session_factory() as session:
+        exercise = session.get(Exercise, exercise_id)
+        assert exercise is not None
+        exercise.status = "submitted"
+        for item in exercise.items:
+            assert item.response is not None
+            item.response.status = ExerciseResponseStatus.SUBMITTED
+            item.response.verdict = ""
+            item.response.feedback_markdown = ""
+            item.response.score = None
+        session.commit()
+
+    recovered = client.post(f"/api/exercises/{exercise_id}/ai-grade")
+
+    assert recovered.status_code == 200, recovered.text
+    assert len(ai_service.codex.prompts) == grading_calls
+    assert all(item["response"]["status"] == "graded" for item in recovered.json()["items"])
+    assert all(
+        item["response"]["feedback_markdown"] == "Answer accepted."
+        for item in recovered.json()["items"]
+    )
+    with session_factory() as session:
+        grading_runs = session.scalars(
+            select(AiRun).where(
+                AiRun.exercise_id == exercise_id,
+                AiRun.task == AiRunTask.EXERCISE_GRADING,
+            )
+        ).all()
+        assert len(grading_runs) == 1
 
 
 def test_guided_reflection_questions_answers_and_review(

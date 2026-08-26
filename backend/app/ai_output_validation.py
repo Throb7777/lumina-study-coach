@@ -5,6 +5,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from app.ai_providers import AiProviderError
+from app.markdown import normalize_ai_markdown
 
 
 class AiOutputValidationError(AiProviderError):
@@ -122,6 +123,18 @@ def grading_output_validator(expected_positions: set[int]) -> Callable[[dict[str
             raise AiOutputValidationError("批改结果题号不完整") from error
         if positions != expected_positions:
             raise AiOutputValidationError("批改结果题号不完整")
+        for item in results:
+            if not isinstance(item, dict):
+                raise AiOutputValidationError("批改结果格式不正确")
+            if item.get("verdict") not in {"correct", "partial", "incorrect"}:
+                raise AiOutputValidationError("批改结果包含无效判断")
+            feedback = item.get("feedback_markdown")
+            if not isinstance(feedback, str) or not feedback.strip():
+                raise AiOutputValidationError("批改结果包含空反馈")
+            try:
+                item["feedback_markdown"] = normalize_ai_markdown(feedback)
+            except ValueError as error:
+                raise AiOutputValidationError(str(error)) from error
 
     return validate
 
