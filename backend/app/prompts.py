@@ -14,6 +14,7 @@ STRUCTURED_RESULT_RULES = """请同时返回：
 - `handoff.source_refs` 只保留本次实际使用过的材料分块；每条返回 `material_id`、
   `chunk_positions` 和一句简短 `evidence_summary`，编号必须来自材料中的 `[M编号:C编号]`
 - 没有直接使用材料时，`handoff.source_refs` 返回空数组
+- JSON 字符串中的反斜杠必须正确转义；LaTeX 命令的反斜杠必须写成 `\\`，不得输出控制字符
 输出必须符合系统指定的 JSON 结构。"""
 
 NOTE_STRUCTURED_RESULT_RULES = """请同时返回：
@@ -23,6 +24,7 @@ NOTE_STRUCTURED_RESULT_RULES = """请同时返回：
 - `handoff.source_refs` 只保留本次实际使用过的材料分块；每条返回 `material_id`、
   `chunk_positions` 和一句简短 `evidence_summary`，编号必须来自材料中的 `[M编号:C编号]`
 - 没有直接使用材料时，`handoff.source_refs` 返回空数组
+- JSON 字符串中的反斜杠必须正确转义；LaTeX 命令的反斜杠必须写成 `\\`，不得输出控制字符
 输出必须符合系统指定的 JSON 结构。"""
 
 

@@ -11,7 +11,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 from app.ai_output_validation import AiOutputValidationError
 from app.ai_preferences import codex_preference, gemini_cli_model, gemini_preference
 from app.ai_providers import AiProviderError, AiProviderResult, AiService
-from app.markdown import normalize_ai_markdown
+from app.markdown import normalize_ai_markdown, normalize_generated_markdown
 from app.materials import MaterialEvidence, MaterialReference, retrieve_material_evidence
 from app.models import (
     AiProvider,
@@ -931,7 +931,9 @@ async def run_codex(
                 )
             display_markdown = payload.get("display_markdown")
             if isinstance(display_markdown, str):
-                result.text = normalize_ai_markdown(display_markdown)
+                result.text = normalize_generated_markdown(display_markdown)
+            else:
+                result.text = json.dumps(payload, ensure_ascii=False)
     except asyncio.CancelledError:
         run.status = AiRunStatus.FAILED
         run.error_text = "生成任务已取消，可从原操作重新生成。"
@@ -989,7 +991,7 @@ async def run_gemini(
         ACTIVE_AI_TASKS[run.id] = current_task
     try:
         result = await ai_service.gemini.generate(prompt, selected_model)
-        result.text = normalize_ai_markdown(result.text)
+        result.text = normalize_generated_markdown(result.text)
     except asyncio.CancelledError:
         run.status = AiRunStatus.FAILED
         run.error_text = "生成任务已取消，可从原操作重新生成。"
@@ -1022,7 +1024,17 @@ def parse_structured_output(text: str) -> dict[str, Any]:
         raise AiOutputValidationError("AI 返回内容不符合约定的结构") from error
     if not isinstance(payload, dict):
         raise AiOutputValidationError("AI 返回内容不符合约定的结构")
-    return payload
+    return normalize_generated_payload(payload)
+
+
+def normalize_generated_payload(value: Any) -> Any:
+    if isinstance(value, str):
+        return normalize_generated_markdown(value)
+    if isinstance(value, list):
+        return [normalize_generated_payload(item) for item in value]
+    if isinstance(value, dict):
+        return {key: normalize_generated_payload(item) for key, item in value.items()}
+    return value
 
 
 def daily_summary_source(session: Session, record: DailyRecord) -> str:

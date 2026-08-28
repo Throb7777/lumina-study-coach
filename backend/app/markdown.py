@@ -92,6 +92,14 @@ def normalize_ai_markdown(content: str) -> str:
     return result
 
 
+def normalize_generated_markdown(content: str) -> str:
+    """Normalize model output and remove control bytes with no visible meaning."""
+    try:
+        return normalize_ai_markdown(content)
+    except ValueError:
+        return normalize_ai_markdown(FORBIDDEN_CONTROL.sub("", content))
+
+
 def validate_note_markdown(content: str) -> tuple[str, list[MarkdownIssue]]:
     issues: list[MarkdownIssue] = []
     try:

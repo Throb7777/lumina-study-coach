@@ -1,4 +1,8 @@
-from app.markdown import normalize_ai_markdown, validate_note_markdown
+from app.markdown import (
+    normalize_ai_markdown,
+    normalize_generated_markdown,
+    validate_note_markdown,
+)
 
 
 def test_normalizes_obsidian_math_delimiters_and_outer_fence() -> None:
@@ -99,6 +103,12 @@ def test_repairs_delete_character_before_latex_symbol_escapes() -> None:
     source = "$\x7f\\{X>t+s\\}$"
 
     assert normalize_ai_markdown(source) == r"$\{X>t+s\}$"
+
+
+def test_generated_markdown_removes_unknown_json_control_characters() -> None:
+    source = "$\x08E[X]=\\mu$ 且正文\x01继续"
+
+    assert normalize_generated_markdown(source) == r"$E[X]=\mu$ 且正文继续"
 
 
 def test_normalizes_html_breaks_outside_code_fences() -> None:

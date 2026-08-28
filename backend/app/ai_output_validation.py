@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from app.ai_providers import AiProviderError
-from app.markdown import normalize_ai_markdown
+from app.markdown import normalize_generated_markdown
 
 
 class AiOutputValidationError(AiProviderError):
@@ -132,7 +132,7 @@ def grading_output_validator(expected_positions: set[int]) -> Callable[[dict[str
             if not isinstance(feedback, str) or not feedback.strip():
                 raise AiOutputValidationError("批改结果包含空反馈")
             try:
-                item["feedback_markdown"] = normalize_ai_markdown(feedback)
+                item["feedback_markdown"] = normalize_generated_markdown(feedback)
             except ValueError as error:
                 raise AiOutputValidationError(str(error)) from error
 

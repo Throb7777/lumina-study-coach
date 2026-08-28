@@ -30,6 +30,14 @@ All notable public changes to Lumina are documented in this file.
 - Validate and normalise every per-question grading feedback item before an AI
   run is marked complete, repair malformed LaTeX symbol escapes, and reuse an
   exact matching completed grading result after a post-processing failure.
+- Remove residual invisible C0 control characters from new AI output after
+  repairing recognised LaTeX escapes, so malformed JSON backslash sequences do
+  not fail an otherwise complete grading result.
+- Keep the Codex App Server JSONL reader alive for large responses, release
+  pending work when the response stream fails, and restart the transport once
+  for safe account and model-list reads.
+- Retain the last successfully read Codex model list when a temporary refresh
+  failure occurs instead of reporting the selected model as unavailable.
 
 ### Changed
 
@@ -42,9 +50,10 @@ All notable public changes to Lumina are documented in this file.
 ### Notes
 
 - The v0.1.3 Windows assets were refreshed on 2026-08-25 for section-note
-  recovery and again on 2026-08-26 for exercise-grading recovery. The version
-  number remains unchanged and existing local learning data is preserved
-  during an upgrade.
+  recovery, on 2026-08-26 for exercise-grading recovery, and on 2026-08-28 for
+  AI-output sanitisation and Codex transport recovery. The version number
+  remains unchanged and existing local learning data is preserved during an
+  upgrade.
 
 ## [0.1.2] - 2026-07-28
 

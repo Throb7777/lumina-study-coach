@@ -790,11 +790,21 @@ async def provider_options_payload(
             models = ai_service.codex.model_options(entries)
             error = ""
         except TimeoutError:
-            models = []
-            error = "Codex 模型列表读取超时，请重试"
+            cached_entries = ai_service.codex.cached_model_entries()
+            models = ai_service.codex.model_options(cached_entries)
+            error = (
+                "Codex 模型列表读取超时，正在显示上次成功读取的列表"
+                if models
+                else "Codex 模型列表读取超时，请重试"
+            )
         except AiProviderError as request_error:
-            models = []
-            error = str(request_error)
+            cached_entries = ai_service.codex.cached_model_entries()
+            models = ai_service.codex.model_options(cached_entries)
+            error = (
+                f"暂时无法刷新，正在显示上次成功读取的列表：{request_error}"
+                if models
+                else str(request_error)
+            )
     else:
         preference = gemini_preference(session)
         default_model = GEMINI_DEFAULT_MODEL

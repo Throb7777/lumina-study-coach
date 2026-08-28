@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session, sessionmaker
 import app.ai_providers as ai_providers_module
 import app.api as api_module
 from app.ai_providers import (
+    CODEX_JSONL_LIMIT_BYTES,
     AiModelOption,
     AiProviderError,
     AiProviderResult,
@@ -19,6 +20,7 @@ from app.ai_providers import (
     AiService,
     AntigravityCli,
     CodexAppServer,
+    CodexTransportError,
     LoginAttempt,
     TurnState,
     build_subprocess_environment,
@@ -435,29 +437,33 @@ def test_grading_repairs_delete_character_before_latex_symbol_escape(
         assert run.status == AiRunStatus.COMPLETED
 
 
-def test_grading_rejects_unknown_controls_without_partially_grading(
+def test_grading_removes_unknown_controls_before_atomic_grading(
     client: TestClient,
     app: FastAPI,
 ) -> None:
     ai_service, exercise = create_submitted_structured_exercise(client, app)
-    ai_service.codex.grading_feedback_markdown = "反馈\x01内容"
+    ai_service.codex.grading_feedback_markdown = "反馈\x01；$\x08E[X]=\\mu$"
 
     grading = client.post(f"/api/exercises/{exercise['id']}/ai-grade")
 
-    assert grading.status_code == 502
-    assert "U+0001" in grading.json()["detail"]
+    assert grading.status_code == 200, grading.text
+    assert all(
+        item["response"]["feedback_markdown"] == r"反馈；$E[X]=\mu$"
+        for item in grading.json()["items"]
+    )
     session_factory: sessionmaker[Session] = app.state.session_factory
     with session_factory() as session:
         persisted = session.get(Exercise, exercise["id"])
         assert persisted is not None
-        assert persisted.status == "submitted"
+        assert persisted.status == "graded"
         assert all(
             item.response is not None
-            and item.response.status == ExerciseResponseStatus.SUBMITTED
+            and item.response.status == ExerciseResponseStatus.GRADED
             for item in persisted.items
         )
         assert all(
-            item.response is not None and not item.response.feedback_markdown
+            item.response is not None
+            and item.response.feedback_markdown == r"反馈；$E[X]=\mu$"
             for item in persisted.items
         )
         run = session.scalar(
@@ -469,8 +475,8 @@ def test_grading_rejects_unknown_controls_without_partially_grading(
             .order_by(AiRun.id.desc())
         )
         assert run is not None
-        assert run.status == AiRunStatus.FAILED
-        assert "U+0001" in run.error_text
+        assert run.status == AiRunStatus.COMPLETED
+        assert "\\u0001" not in run.output_text
 
 
 def test_grading_reuses_matching_completed_result_after_write_failure(
@@ -670,6 +676,44 @@ def test_provider_status_probe_timeout_returns_an_error_state(
     assert providers[0].state == "error"
     assert providers[0].connected is False
     assert providers[0].detail == "Codex 连接状态读取超时，请重试"
+
+
+def test_codex_status_uses_last_model_list_when_refresh_temporarily_fails(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    service = AiService(tmp_path / "codex-home", tmp_path / "workspace")
+    service.codex.executable = "codex"
+    service.codex.model_cache = (
+        0,
+        [
+            {
+                "model": "gpt-5.5",
+                "displayName": "GPT-5.5",
+                "supportedReasoningEfforts": [{"reasoningEffort": "medium"}],
+            }
+        ],
+    )
+
+    async def fake_account() -> dict:
+        return {"email": "learner@example.com", "planType": "plus"}
+
+    async def fake_version() -> str:
+        return "codex 1.0"
+
+    async def fail_model_refresh() -> list[dict]:
+        raise AiProviderError("Codex 请求超时：model/list")
+
+    monkeypatch.setattr(service.codex, "account", fake_account)
+    monkeypatch.setattr(service.codex, "cli_version", fake_version)
+    monkeypatch.setattr(service.codex, "model_entries", fail_model_refresh)
+
+    status = asyncio.run(service._codex_status("gpt-5.5", "medium"))
+
+    assert status.connected is True
+    assert status.model_available is True
+    assert status.state == "connected"
+    assert "上次成功结果" in status.detail
 
 
 def test_model_list_probes_are_reused_for_a_short_refresh_window(
@@ -890,7 +934,8 @@ def test_codex_declares_experimental_api_capability_on_initialize(
         stderr = FakeStream()
 
     async def fake_create_subprocess_exec(*args, **kwargs):
-        del args, kwargs
+        del args
+        captured["spawn"] = kwargs
         return FakeProcess()
 
     async def fake_request(method: str, params: dict):
@@ -911,6 +956,88 @@ def test_codex_declares_experimental_api_capability_on_initialize(
     asyncio.run(codex.start())
 
     assert captured["initialize"]["capabilities"] == {"experimentalApi": True}
+    assert captured["spawn"]["limit"] == CODEX_JSONL_LIMIT_BYTES
+
+
+def test_codex_stdout_reader_accepts_jsonl_larger_than_default_limit(tmp_path: Path) -> None:
+    codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+
+    async def read_large_response() -> None:
+        stream = asyncio.StreamReader(limit=CODEX_JSONL_LIMIT_BYTES)
+
+        class FakeProcess:
+            stdout = stream
+
+        codex.process = FakeProcess()
+        future = asyncio.get_running_loop().create_future()
+        codex.pending[1] = future
+        payload = {"id": 1, "result": {"data": "x" * (128 * 1024)}}
+        stream.feed_data((json.dumps(payload) + "\n").encode())
+        stream.feed_eof()
+
+        await codex._read_stdout()
+
+        assert (await future)["data"] == "x" * (128 * 1024)
+
+    asyncio.run(read_large_response())
+
+
+def test_codex_stdout_failure_releases_active_turn(tmp_path: Path) -> None:
+    codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+
+    class BrokenStream:
+        async def readline(self) -> bytes:
+            raise ValueError("line exceeds stream limit")
+
+    class FakeProcess:
+        stdout = BrokenStream()
+
+    async def observe_failure() -> None:
+        codex.process = FakeProcess()
+        state = TurnState()
+        codex.turns["turn-1"] = state
+
+        await codex._read_stdout()
+
+        assert state.completed.is_set()
+        assert "响应流异常" in state.error
+
+    asyncio.run(observe_failure())
+
+
+def test_codex_read_request_restarts_once_after_transport_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+    attempts = 0
+    closes = 0
+
+    async def fake_start() -> None:
+        return None
+
+    async def fake_close() -> None:
+        nonlocal closes
+        closes += 1
+
+    async def fake_request_once(method: str, params: dict) -> dict:
+        nonlocal attempts
+        assert method == "account/read"
+        assert params == {"refreshToken": False}
+        attempts += 1
+        if attempts == 1:
+            raise CodexTransportError("reader stopped")
+        return {"account": {"email": "learner@example.com"}}
+
+    monkeypatch.setattr(codex, "start", fake_start)
+    monkeypatch.setattr(codex, "close", fake_close)
+    monkeypatch.setattr(codex, "_request_once", fake_request_once)
+
+    account = asyncio.run(codex.account())
+
+    assert account == {"email": "learner@example.com"}
+    assert attempts == 2
+    assert closes == 1
 
 
 def test_access_denied_recommends_the_local_launcher() -> None:
@@ -1444,20 +1571,21 @@ def test_embedded_ai_workflow_and_learning_memory(
     assert background_result.json()["result"]["text"] == r"$\sigma$ 与随机变量使用相同单位"
 
     app.state.ai_service.codex.display_markdown = "正文\x01内容"
-    invalid_background_run = client.post(
+    sanitized_background_run = client.post(
         f"/api/daily-records/{record['id']}/ai-section-note-runs",
         json={"existing_content": "已有内容", "mode": "revise"},
     )
-    assert invalid_background_run.status_code == 202
-    invalid_run_id = invalid_background_run.json()["id"]
+    assert sanitized_background_run.status_code == 202
+    sanitized_run_id = sanitized_background_run.json()["id"]
     for _ in range(40):
-        invalid_background_result = client.get(f"/api/ai-runs/{invalid_run_id}/result")
-        if invalid_background_result.json()["run"]["status"] != "running":
+        sanitized_background_result = client.get(
+            f"/api/ai-runs/{sanitized_run_id}/result"
+        )
+        if sanitized_background_result.json()["run"]["status"] != "running":
             break
         asyncio.run(asyncio.sleep(0.01))
-    assert invalid_background_result.json()["run"]["status"] == "failed"
-    assert "U+0001" in invalid_background_result.json()["run"]["error_text"]
-    assert invalid_background_result.json()["result"] is None
+    assert sanitized_background_result.json()["run"]["status"] == "completed"
+    assert sanitized_background_result.json()["result"]["text"] == "正文内容"
     app.state.ai_service.codex.display_markdown = "AI 生成结果"
     polished = client.post(
         f"/api/sections/{section['id']}/ai-polish-note",
