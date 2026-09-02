@@ -1,5 +1,6 @@
 import {
   useEffect,
+  useLayoutEffect,
   useRef,
   useState,
   type CSSProperties,
@@ -7,7 +8,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react'
 import { BookX, Library, NotebookPen, PanelLeftClose, PanelLeftOpen, Settings } from 'lucide-react'
-import { Link, NavLink, Outlet, useLocation, useNavigation } from 'react-router-dom'
+import { Link, NavLink, Outlet, useLocation, useNavigation, useNavigationType } from 'react-router-dom'
 import './App.css'
 import {
   applyAppearancePreferences,
@@ -76,6 +77,7 @@ function DelayedRouteProgress() {
 
 function App() {
   const location = useLocation()
+  const navigationType = useNavigationType()
   const [sidebarCollapsed, setSidebarCollapsed] = useState(
     () => localStorage.getItem(sidebarPreferenceKey) === 'true',
   )
@@ -97,6 +99,11 @@ function App() {
   useEffect(() => {
     localStorage.setItem(sidebarPreferenceKey, String(sidebarCollapsed))
   }, [sidebarCollapsed])
+
+  useLayoutEffect(() => {
+    if (navigationType === 'POP' || location.hash) return
+    window.scrollTo({ top: 0, left: 0, behavior: 'auto' })
+  }, [location.pathname, location.hash, navigationType])
 
   function updateSidebarWidth(value: number) {
     const nextWidth = clampSidebarWidth(value)

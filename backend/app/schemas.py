@@ -388,6 +388,9 @@ class ExerciseResponseAttachmentRead(ORMModel):
     media_type: str
     size_bytes: int
     processing_status: str
+    grading_input_mode: str
+    extracted_text_length: int
+    extracted_text_preview: str
 
 
 class ExerciseResponseRead(ORMModel):

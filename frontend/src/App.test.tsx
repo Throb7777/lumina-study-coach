@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 import { RouterProvider, createMemoryRouter } from 'react-router-dom'
@@ -177,6 +177,10 @@ function renderApp(initialEntries: string[]) {
   const router = createMemoryRouter(appRoutes, { initialEntries })
   return { router, ...render(<RouterProvider router={router} />) }
 }
+
+beforeEach(() => {
+  vi.stubGlobal('scrollTo', vi.fn())
+})
 
 afterEach(() => {
   cleanup()
@@ -1100,6 +1104,9 @@ describe('App', () => {
       media_type: 'image/png',
       size_bytes: 2048,
       processing_status: 'ready',
+      grading_input_mode: 'multimodal_image',
+      extracted_text_length: 18,
+      extracted_text_preview: 'OCR 识别出的作答摘要',
     }
     const updatedExercise = {
       ...structuredExercise,
@@ -1126,6 +1133,9 @@ describe('App', () => {
 
     expect(await screen.findByText('handwritten.png')).toBeInTheDocument()
     expect(screen.getByText('2 KB')).toBeInTheDocument()
+    expect(screen.getByText('原图直读 · OCR 辅助 18 字')).toBeInTheDocument()
+    await user.click(screen.getByText('查看 OCR 文本'))
+    expect(screen.getByText('OCR 识别出的作答摘要')).toBeInTheDocument()
     expect(fetchMock).toHaveBeenNthCalledWith(
       2,
       '/api/exercise-items/105/attachments',
@@ -1796,6 +1806,98 @@ describe('App', () => {
     expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/daily-records/1/complete', expect.objectContaining({
       method: 'POST',
     }))
+  })
+
+  it('saves a dirty visible form before completing today', async () => {
+    const readyRecord = {
+      ...dailyRecord,
+      workflow_nodes: workflowNodes.map((node) => (
+        node.node_key === 'daily_close' ? node : { ...node, status: 'completed' }
+      )),
+      preview_question_set: {
+        id: 1,
+        daily_record_id: 1,
+        prompt_text: 'prompt',
+        question_1: '问题一',
+        question_2: '问题二',
+        question_3: '问题三',
+      },
+    }
+    const completedRecord = { ...readyRecord, is_completed: true }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse(readyRecord))
+      .mockImplementationOnce((_path: string, options: RequestInit) => jsonResponse({
+        ...readyRecord,
+        ...JSON.parse(String(options.body)),
+      }))
+      .mockImplementationOnce(() => jsonResponse(completedRecord))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    await user.type(await screen.findByLabelText(/相关知识/), '条件概率基础')
+    await user.click(screen.getByRole('button', { name: '今日完成' }))
+
+    expect(await screen.findByText('今日学习已完成')).toBeInTheDocument()
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/daily-records/1', expect.objectContaining({
+      method: 'PATCH',
+      body: expect.stringContaining('条件概率基础'),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/daily-records/1/complete', expect.objectContaining({
+      method: 'POST',
+    }))
+  })
+
+  it('saves the visible answer before generating a replacement exercise', async () => {
+    const updatedExercise = {
+      ...structuredExercise,
+      items: structuredExerciseItems.map((item) => item.position === 1 ? {
+        ...item,
+        response: { ...item.response, selected_options: ['A'], status: 'draft' },
+      } : item),
+    }
+    const replacementExercise = { ...structuredExercise, id: 3 }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse({ ...dailyRecord, exercises: [structuredExercise] }))
+      .mockImplementationOnce(() => jsonResponse(updatedExercise))
+      .mockImplementationOnce(() => jsonResponse(replacementExercise, 201))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/daily-records/1'])
+
+    await user.click(await screen.findByRole('button', { name: '展开练习与推导' }))
+    await user.click(screen.getByRole('radio', { name: /Option A/ }))
+    await user.click(screen.getByRole('button', { name: '生成新一组练习' }))
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3))
+    expect(fetchMock).toHaveBeenNthCalledWith(2, '/api/exercise-items/101/response', expect.objectContaining({
+      method: 'PUT',
+      body: JSON.stringify({ answer_markdown: '', selected_options: ['A'] }),
+    }))
+    expect(fetchMock).toHaveBeenNthCalledWith(3, '/api/daily-records/1/ai-practice', expect.objectContaining({
+      method: 'POST',
+    }))
+  })
+
+  it('scrolls new pushed routes to the top', async () => {
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+    const fetchMock = vi.fn().mockImplementation((input: string) => {
+      if (input === '/api/courses/1') return jsonResponse(courseDetail)
+      if (input === '/api/daily-records/1') return jsonResponse(dailyRecord)
+      return jsonResponse({ detail: 'not found' }, 404)
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const { router } = renderApp(['/courses/1'])
+    await screen.findByRole('heading', { name: '概率论' })
+    scrollTo.mockClear()
+
+    await act(() => router.navigate('/daily-records/1'))
+
+    await screen.findByRole('heading', { name: '条件概率' })
+    expect(scrollTo).toHaveBeenCalledWith({ top: 0, left: 0, behavior: 'auto' })
   })
 
   it('shows the generated daily summary without a duplicate outer label', async () => {

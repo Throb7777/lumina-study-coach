@@ -147,3 +147,19 @@ def validate_preview_output(payload: dict[str, Any]) -> None:
         or not all(isinstance(question, str) and question.strip() for question in questions)
     ):
         raise AiOutputValidationError("下次回顾问题生成结果不是完整的 3 个问题")
+    normalized_questions: list[str] = []
+    for question in questions:
+        normalized = normalize_generated_markdown(question)
+        normalized = re.sub(r"^\s*\d+\s*[.、．)）]\s*", "", normalized)
+        normalized = re.sub(
+            r"\$\$\s*([^$\n]+?)\s*\$\$",
+            lambda match: f"${match.group(1).strip()}$",
+            normalized,
+        )
+        if "$$" in normalized:
+            raise AiOutputValidationError("下次回顾问题不应包含块级公式")
+        normalized = " ".join(part.strip() for part in normalized.splitlines() if part.strip())
+        if not normalized:
+            raise AiOutputValidationError("下次回顾问题内容不能为空")
+        normalized_questions.append(normalized)
+    payload["questions"] = normalized_questions

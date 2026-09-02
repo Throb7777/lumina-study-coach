@@ -47,7 +47,9 @@ release before installation.
 - Creates one study record whenever you continue a section.
 - Guides recall, active reconstruction, practice, correction, and next-step questions.
 - Generates 12-question practice sets with one-question-at-a-time answering and review.
-- Accepts compact image and PDF attachments for non-choice practice answers.
+- Accepts compact image and PDF attachments for non-choice practice answers;
+  Codex receives original images as multimodal input with local OCR as an aid,
+  while PDFs use locally extracted text.
 - Keeps structured mistakes, learning memory, and section notes searchable.
 - Imports native-text and scanned PDFs, web pages, and supported public-video
   transcripts.

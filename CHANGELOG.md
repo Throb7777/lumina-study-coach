@@ -38,6 +38,13 @@ All notable public changes to Lumina are documented in this file.
   for safe account and model-list reads.
 - Retain the last successfully read Codex model list when a temporary refresh
   failure occurs instead of reporting the selected model as unavailable.
+- Send image practice answers to Codex as original multimodal input with local
+  OCR text as a secondary aid, while keeping PDF answers text-based.
+- Open newly selected study records at the top, compact malformed line breaks
+  around closing-question formulas, and auto-save visible work before creating
+  a practice set or completing the day.
+- Ignore stale unmounted form markers so a phantom unsaved-content warning no
+  longer blocks day completion.
 
 ### Changed
 
@@ -50,8 +57,9 @@ All notable public changes to Lumina are documented in this file.
 ### Notes
 
 - The v0.1.3 Windows assets were refreshed on 2026-08-25 for section-note
-  recovery, on 2026-08-26 for exercise-grading recovery, and on 2026-08-28 for
-  AI-output sanitisation and Codex transport recovery. The version number
+  recovery, on 2026-08-26 for exercise-grading recovery, on 2026-08-28 for
+  AI-output sanitisation and Codex transport recovery, and on 2026-09-02 for
+  multimodal image grading and study-flow reliability. The version number
   remains unchanged and existing local learning data is preserved during an
   upgrade.
 

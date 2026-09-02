@@ -13,6 +13,7 @@ import app.ai_providers as ai_providers_module
 import app.api as api_module
 from app.ai_providers import (
     CODEX_JSONL_LIMIT_BYTES,
+    AiLocalImage,
     AiModelOption,
     AiProviderError,
     AiProviderResult,
@@ -1138,6 +1139,74 @@ def test_codex_uses_gpt_5_5_with_medium_effort(tmp_path, monkeypatch) -> None:
     assert codex.active_model == "gpt-5.5"
 
 
+def test_codex_sends_local_images_as_multimodal_turn_input(tmp_path, monkeypatch) -> None:
+    codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+    image_path = tmp_path / "answers" / "handwritten.png"
+    image_path.parent.mkdir()
+    image_path.write_bytes(b"image")
+
+    async def fake_account():
+        return {"email": "test@example.com"}
+
+    async def fake_request(method: str, params: dict):
+        if method == "model/list":
+            return {"data": [{"model": "gpt-5.5", "inputModalities": ["text", "image"]}]}
+        if method == "thread/start":
+            return {"thread": {"id": "thread-1"}}
+        if method == "turn/start":
+            assert params["input"] == [
+                {"type": "text", "text": "批改这份答案"},
+                {"type": "text", "text": "第 5 题作答附件：handwritten.png"},
+                {"type": "localImage", "path": str(image_path), "detail": "original"},
+            ]
+            assert params["runtimeWorkspaceRoots"] == [
+                str(tmp_path / "workspace"),
+                str(image_path.parent),
+            ]
+            state = codex.turns.setdefault("turn-1", TurnState())
+            state.text = "完成"
+            state.completed.set()
+            return {"turn": {"id": "turn-1"}}
+        raise AssertionError(f"Unexpected method: {method}")
+
+    monkeypatch.setattr(codex, "account", fake_account)
+    monkeypatch.setattr(codex, "request", fake_request)
+
+    result = asyncio.run(
+        codex.generate(
+            "批改这份答案",
+            local_images=[AiLocalImage(image_path, "第 5 题作答附件：handwritten.png")],
+        )
+    )
+
+    assert result.text == "完成"
+
+
+def test_codex_rejects_images_for_a_text_only_model(tmp_path, monkeypatch) -> None:
+    codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
+    image_path = tmp_path / "answer.png"
+    image_path.write_bytes(b"image")
+
+    async def fake_account():
+        return {"email": "test@example.com"}
+
+    async def fake_request(method: str, params: dict):
+        del params
+        assert method == "model/list"
+        return {"data": [{"model": "gpt-5.5", "inputModalities": ["text"]}]}
+
+    monkeypatch.setattr(codex, "account", fake_account)
+    monkeypatch.setattr(codex, "request", fake_request)
+
+    with pytest.raises(AiProviderError, match="不支持图片输入"):
+        asyncio.run(
+            codex.generate(
+                "批改",
+                local_images=[AiLocalImage(image_path, "手写答案")],
+            )
+        )
+
+
 def test_codex_cancellation_interrupts_the_active_turn(tmp_path, monkeypatch) -> None:
     codex = CodexAppServer(tmp_path / "home", tmp_path / "workspace")
     calls: list[str] = []
@@ -1466,6 +1535,9 @@ def test_embedded_ai_workflow_and_learning_memory(
     uploaded_attachment = attachment_upload.json()["items"][4]["response"]["attachments"][0]
     assert uploaded_attachment["original_name"] == "handwritten.png"
     assert uploaded_attachment["processing_status"] == "ready_truncated"
+    assert uploaded_attachment["grading_input_mode"] == "multimodal_image"
+    assert uploaded_attachment["extracted_text_length"] == 50_000
+    assert uploaded_attachment["extracted_text_preview"].startswith("手写答案：先列出条件")
     session_factory: sessionmaker[Session] = app.state.session_factory
     with session_factory() as session:
         stored_attachment = session.get(
@@ -1532,6 +1604,10 @@ def test_embedded_ai_workflow_and_learning_memory(
     ).status_code == 422
     assert "本地选择题判定：incorrect" in app.state.ai_service.codex.prompts[-1]
     assert "手写答案：先列出条件，再完成计算。" in app.state.ai_service.codex.prompts[-1]
+    local_images = app.state.ai_service.codex.last_options["local_images"]
+    assert len(local_images) == 1
+    assert local_images[0].label == "第 5 题作答附件：handwritten.png"
+    assert local_images[0].path.is_file()
     deleted_attachment = client.delete(
         f"/api/exercise-response-attachments/{uploaded_attachment['id']}"
     )

@@ -69,6 +69,12 @@ class AiProviderResult:
 
 
 @dataclass(frozen=True)
+class AiLocalImage:
+    path: Path
+    label: str
+
+
+@dataclass(frozen=True)
 class AiModelOption:
     model: str
     display_name: str
@@ -500,6 +506,7 @@ class CodexAppServer:
         fork_thread_id: str = "",
         fork_last_turn_id: str = "",
         readable_roots: list[Path] | None = None,
+        local_images: list[AiLocalImage] | None = None,
         model: str | None = None,
         reasoning_effort: str | None = None,
         timeout_seconds: float = 300,
@@ -526,6 +533,19 @@ class CodexAppServer:
                 raise AiProviderError(
                     f"{selected_model} 不支持 {selected_effort.title()}，请在设置中重新选择。"
                 )
+            images = list(local_images or [])
+            selected_entry = next(
+                (entry for entry in entries if self._model_name(entry) == selected_model),
+                None,
+            )
+            modalities = selected_entry.get("inputModalities") if selected_entry else None
+            if images and isinstance(modalities, list) and "image" not in modalities:
+                raise AiProviderError(
+                    f"{display_model_name(selected_model)} 不支持图片输入，请选择支持图片的模型。"
+                )
+            for image in images:
+                if not image.path.is_file():
+                    raise AiProviderError(f"作答图片不存在或无法读取：{image.path.name}")
             try:
                 if resume_thread_id:
                     thread = await self.request(
@@ -580,11 +600,27 @@ class CodexAppServer:
                 resolved = str(root.resolve())
                 if resolved not in roots:
                     roots.append(resolved)
+            turn_input: list[dict[str, str]] = [{"type": "text", "text": prompt}]
+            for image in images:
+                resolved_image = image.path.resolve()
+                image_root = str(resolved_image.parent)
+                if image_root not in roots:
+                    roots.append(image_root)
+                turn_input.extend(
+                    [
+                        {"type": "text", "text": image.label},
+                        {
+                            "type": "localImage",
+                            "path": str(resolved_image),
+                            "detail": "original",
+                        },
+                    ]
+                )
             turn = await self.request(
                 "turn/start",
                 {
                     "threadId": thread_id,
-                    "input": [{"type": "text", "text": prompt}],
+                    "input": turn_input,
                     "model": selected_model,
                     "effort": selected_effort,
                     "summary": "none",

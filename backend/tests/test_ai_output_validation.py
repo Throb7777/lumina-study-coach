@@ -1,6 +1,10 @@
 import pytest
 
-from app.ai_output_validation import AiOutputValidationError, validate_practice_output
+from app.ai_output_validation import (
+    AiOutputValidationError,
+    validate_practice_output,
+    validate_preview_output,
+)
 
 
 def practice_payload() -> dict:
@@ -41,3 +45,21 @@ def test_practice_validation_rejects_near_duplicate_history_question() -> None:
 
     with pytest.raises(AiOutputValidationError, match="重复度过高"):
         validate_practice_output(payload, excluded)
+
+
+def test_preview_validation_compacts_numbered_questions_and_inline_math() -> None:
+    payload = {
+        "questions": [
+            r"1. 说明 $\\mathrm{Cov}(X,Y)$ 的含义。",
+            "2）\n\n比较独立与不相关的条件。",
+            r"3. 用 $$P(A\mid B)=P(A)$$ 检查结论。",
+        ]
+    }
+
+    validate_preview_output(payload)
+
+    assert payload["questions"] == [
+        r"说明 $\mathrm{Cov}(X,Y)$ 的含义。",
+        "比较独立与不相关的条件。",
+        r"用 $P(A\mid B)=P(A)$ 检查结论。",
+    ]

@@ -4440,6 +4440,7 @@ select:not(:disabled) {
   border-radius: 5px;
   background: #f8f4ee;
   font-size: var(--font-xs);
+  flex-wrap: wrap;
 }
 
 .answer-attachment-list li > span {
@@ -4467,6 +4468,22 @@ select:not(:disabled) {
 .answer-attachment-list button:hover {
   background: var(--danger-soft);
   color: var(--danger);
+}
+
+.answer-attachment-ocr {
+  flex-basis: 100%;
+  padding: 0 2px 7px 20px;
+  color: var(--text-secondary);
+}
+
+.answer-attachment-ocr summary {
+  width: fit-content;
+  cursor: pointer;
+}
+
+.answer-attachment-ocr p {
+  margin: 6px 0 0;
+  white-space: pre-wrap;
 }
 
 .exercise-item-feedback,

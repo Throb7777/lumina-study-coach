@@ -3,6 +3,8 @@ const fenceLine = /^\s*(`{3,}|~{3,})/
 const listDisplayStart = /^(\s*)((?:[-+*]|\d+[.)]))\s+\\\[\s*$/
 const inlineDisplayMath = /\\\[([^\n]+?)\\\]/g
 const htmlBreak = /<br\s*\/?>/gi
+const inlineMath = /(?<!\\)(?<!\$)\$(?!\$)(.+?)(?<!\\)\$(?!\$)/g
+const duplicateLatexCommand = /(?<!\\)\\\\(?=(?:begin|end|mathrm|operatorname|text|frac|dfrac|tfrac|sqrt|mathbb|mathbf|mathcal|mathit|mathsf|mathtt|overline|underline|hat|bar|vec|sum|prod|int|lim|log|ln|sin|cos|tan|exp|omega|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|psi|rho|varepsilon|partial|nabla)\b)/g
 
 function controlPattern(code: number, suffix: string) {
   return new RegExp(`${String.fromCharCode(code)}${suffix}`, 'g')
@@ -69,7 +71,11 @@ export function normalizeMarkdownMath(content: string) {
       continue
     }
     line = line.replace(inlineDisplayMath, '$$$1$')
-    normalized.push(line.replaceAll(String.raw`\(`, '$').replaceAll(String.raw`\)`, '$'))
+    line = line.replaceAll(String.raw`\(`, '$').replaceAll(String.raw`\)`, '$')
+    line = line.replace(inlineMath, (_match, body: string) => (
+      `$${body.replace(duplicateLatexCommand, '\\')}$`
+    ))
+    normalized.push(line)
   }
 
   return normalized.join('\n').trim()

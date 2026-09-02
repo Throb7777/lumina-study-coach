@@ -835,6 +835,18 @@ class ExerciseResponseAttachment(TimestampMixin, Base):
 
     exercise_response: Mapped[ExerciseResponse] = relationship(back_populates="attachments")
 
+    @property
+    def grading_input_mode(self) -> str:
+        return "multimodal_image" if self.media_type.startswith("image/") else "extracted_text"
+
+    @property
+    def extracted_text_length(self) -> int:
+        return len(self.extracted_text)
+
+    @property
+    def extracted_text_preview(self) -> str:
+        return self.extracted_text[:600]
+
 
 class Mistake(TimestampMixin, Base):
     __tablename__ = "mistakes"

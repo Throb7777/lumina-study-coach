@@ -23,6 +23,13 @@ FORBIDDEN_CONTROL = re.compile(r"[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]")
 HTML_BREAK = re.compile(r"<br\s*/?>", re.IGNORECASE)
 LATEX_BEGIN = re.compile(r"\\begin\{([^}]+)\}")
 LATEX_END = re.compile(r"\\end\{([^}]+)\}")
+INLINE_MATH = re.compile(r"(?<!\\)(?<!\$)\$(?!\$)(.+?)(?<!\\)\$(?!\$)")
+DUPLICATE_LATEX_COMMAND = re.compile(
+    r"(?<!\\)\\\\(?=(?:begin|end|mathrm|operatorname|text|frac|dfrac|tfrac|sqrt|"
+    r"mathbb|mathbf|mathcal|mathit|mathsf|mathtt|overline|underline|hat|bar|vec|"
+    r"sum|prod|int|lim|log|ln|sin|cos|tan|exp|omega|alpha|beta|gamma|delta|theta|"
+    r"lambda|mu|sigma|phi|psi|rho|varepsilon|partial|nabla)\b)"
+)
 
 
 @dataclass(frozen=True)
@@ -81,7 +88,12 @@ def normalize_ai_markdown(content: str) -> str:
             index += 1
             continue
         line = INLINE_DISPLAY_MATH.sub(lambda match: f"${match.group('body')}$", line)
-        normalized.append(line.replace(r"\(", "$").replace(r"\)", "$"))
+        line = line.replace(r"\(", "$").replace(r"\)", "$")
+        line = INLINE_MATH.sub(
+            lambda match: f"${DUPLICATE_LATEX_COMMAND.sub(r'\\', match.group(1))}$",
+            line,
+        )
+        normalized.append(line)
         index += 1
 
     result = "\n".join(normalized).strip()

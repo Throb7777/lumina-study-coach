@@ -117,6 +117,22 @@ def test_normalizes_html_breaks_outside_code_fences() -> None:
     assert normalize_ai_markdown(source) == "第一行  \n第二行\n\n```html\n<br>\n```"
 
 
+def test_repairs_duplicate_latex_command_escape_only_in_inline_math() -> None:
+    source = r"""协方差 $\\mathrm{Cov}(X,Y)$。
+
+$$
+\\begin{aligned}x&=1\\y&=2\\end{aligned}
+$$"""
+
+    assert normalize_ai_markdown(source) == (
+        r"""协方差 $\mathrm{Cov}(X,Y)$。
+
+$$
+\\begin{aligned}x&=1\\y&=2\\end{aligned}
+$$"""
+    )
+
+
 def test_reports_unclosed_fences_and_unmatched_math_structure() -> None:
     normalized, issues = validate_note_markdown(
         "正文\n\n```python\nvalue = 1\n\n$$\n\\begin{aligned}x=1"

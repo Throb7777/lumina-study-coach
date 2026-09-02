@@ -268,8 +268,14 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
         for item in exercise.items:
             response = item.response
             local_verdict = deterministic_choice_verdict(item)
+            answer_text = (
+                response.answer_markdown.strip()
+                if response and response.answer_markdown.strip()
+                else "未填写文字答案；如有附件，请直接依据附件批改"
+            )
             attachment_text = "\n\n".join(
-                f"附件 {attachment.original_name}（OCR/文本提取）：\n{attachment.extracted_text}"
+                f"附件 {attachment.original_name}（OCR/文本提取，仅作辅助）：\n"
+                f"{attachment.extracted_text or '未识别出可靠文字，请依据原图批改'}"
                 for attachment in (response.attachments if response else [])
             )
             item_blocks.append(
@@ -280,7 +286,7 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
 参考答案：{item.answer_key_json}
 评分标准：{item.rubric_markdown}
 我的选择：{response.selected_options_json if response else "[]"}
-我的作答：{response.answer_markdown if response else "未作答"}
+我的作答：{answer_text}
 作答附件：{attachment_text or "无"}
 本地选择题判定：{local_verdict or "不适用，由你依据评分标准判断"}"""
             )
@@ -303,6 +309,8 @@ def grading_prompt(record: DailyRecord, exercise: Exercise) -> str:
 
 不要生成整套分数或总评，不要继续追问，也不要生成新题。
 反馈必须对应用户的实际作答；正确题不要重复输出冗长标准答案。
+图片附件的原图会作为多模态输入按题号紧随本提示词提供。OCR 文字只用于辅助定位，
+不得因为 OCR 为空、乱码或不完整而把包含手写作答的图片判为未作答；应优先阅读原图。
 
 {MARKDOWN_MATH_RULES}
 {STRUCTURED_RESULT_RULES}
@@ -341,8 +349,10 @@ def preview_questions_prompt(record: DailyRecord, previous_records: list[DailyRe
 - 只围绕今天已经学习的内容，不引入下一次尚未学习的新知识
 - 兼顾概念连接、推导条件和应用边界
 - 每条独立、具体，适合下一次学习开始时闭卷回答
+- 每条只使用一个紧凑段落，不自行添加题号，不使用块级公式；短公式使用 `$...$`
 - 不提供答案
 
+{MARKDOWN_MATH_RULES}
 {STRUCTURED_RESULT_RULES}
 """
 

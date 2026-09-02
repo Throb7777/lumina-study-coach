@@ -69,4 +69,22 @@ describe('Markdown math normalization', () => {
       String.raw`$P(\omega)=\frac{1}{2}$ and $\binom{n}{k}$`,
     )
   })
+
+  it('repairs duplicate command escapes only inside inline math', () => {
+    const source = [
+      String.raw`协方差 $\\mathrm{Cov}(X,Y)$。`,
+      '',
+      '$$',
+      String.raw`\\begin{aligned}x&=1\\y&=2\\end{aligned}`,
+      '$$',
+    ].join('\n')
+
+    expect(normalizeMarkdownMath(source)).toBe([
+      String.raw`协方差 $\mathrm{Cov}(X,Y)$。`,
+      '',
+      '$$',
+      String.raw`\\begin{aligned}x&=1\\y&=2\\end{aligned}`,
+      '$$',
+    ].join('\n'))
+  })
 })

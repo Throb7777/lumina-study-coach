@@ -23,6 +23,12 @@ Network access occurs only for an explicit feature:
 - Running an external AI task.
 - Downloading the optional semantic-search model.
 
+When Codex grades a non-choice response, original image attachments are sent
+to the selected Codex model as multimodal input and local OCR text is included
+as a secondary aid. PDF response attachments are represented by locally
+extracted text. Lumina shows the active grading input mode beside each
+attachment.
+
 The Windows installer includes the OCR engine and its English and Simplified
 Chinese language data. PDF OCR runs locally and does not download a model or
 send the document to an OCR service.

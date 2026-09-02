@@ -483,17 +483,29 @@ export function DailyRecordPage() {
   useEffect(() => {
     if (!record || !pageRef.current) return
     const restoredKeys: string[] = []
-    pageRef.current.querySelectorAll<HTMLFormElement>('form[data-dirty-key]').forEach((form) => {
+    const forms = Array.from(
+      pageRef.current.querySelectorAll<HTMLFormElement>('form[data-dirty-key]'),
+    )
+    const mountedKeys = new Set(forms.flatMap((form) => (
+      form.dataset.dirtyKey ? [form.dataset.dirtyKey] : []
+    )))
+    forms.forEach((form) => {
       const key = form.dataset.dirtyKey
       if (key && restoreFormDraft(formDraftKey(key), form) && formIsDirty(form)) restoredKeys.push(key)
     })
-    if (restoredKeys.length === 0) return
     const timer = window.setTimeout(() => {
       setDirtyFormKeys((currentKeys) => {
-        if (restoredKeys.every((key) => currentKeys.has(key))) return currentKeys
-        return new Set([...currentKeys, ...restoredKeys])
+        const nextKeys = new Set(
+          [...currentKeys].filter((key) => mountedKeys.has(key)),
+        )
+        restoredKeys.forEach((key) => nextKeys.add(key))
+        if (
+          nextKeys.size === currentKeys.size
+          && [...nextKeys].every((key) => currentKeys.has(key))
+        ) return currentKeys
+        return nextKeys
       })
-      setDraftRecovered(true)
+      if (restoredKeys.length > 0) setDraftRecovered(true)
     }, 0)
     return () => window.clearTimeout(timer)
     // The signature changes only when draft-bearing forms are added or replaced.
@@ -635,14 +647,25 @@ export function DailyRecordPage() {
     setBusy(true)
     setError('')
     try {
-      const forms = Array.from(document.querySelectorAll<HTMLFormElement>('form[data-dirty-key]'))
+      const forms = Array.from(
+        pageRef.current?.querySelectorAll<HTMLFormElement>('form[data-dirty-key]') ?? [],
+      )
+      const mountedKeys = new Set(forms.flatMap((form) => (
+        form.dataset.dirtyKey ? [form.dataset.dirtyKey] : []
+      )))
+      const staleKeys = [...dirtyFormKeys].filter((key) => !mountedKeys.has(key))
+      if (staleKeys.length > 0) {
+        setDirtyFormKeys((currentKeys) => new Set(
+          [...currentKeys].filter((key) => mountedKeys.has(key)),
+        ))
+      }
       for (const key of dirtyFormKeys) {
         const form = forms.find((item) => item.dataset.dirtyKey === key)
-        if (!form) throw new Error('有一处未保存内容已关闭，请返回检查后重试')
+        if (!form) continue
         await saveDirtyForm(form)
         markFormSaved(form)
       }
-      setNotice('未保存的学习内容已保存')
+      if (dirtyFormKeys.size > staleKeys.length) setNotice('未保存的学习内容已保存')
     } catch (saveError) {
       const message = saveError instanceof Error ? saveError.message : '保存学习内容失败'
       setError(message)
@@ -932,6 +955,13 @@ export function DailyRecordPage() {
 
   async function createExercise() {
     if (!record) return
+    if (dirtyFormKeys.size > 0) {
+      try {
+        await saveAllDirtyForms()
+      } catch {
+        return
+      }
+    }
     startAiTask({ key: 'practice', label: '正在生成练习题' })
     setError('')
     setNotice('')
@@ -1386,8 +1416,11 @@ export function DailyRecordPage() {
   async function completeToday(trigger: HTMLButtonElement) {
     if (!record) return
     if (dirtyFormKeys.size > 0) {
-      setError('请先保存当前修改，再完成今日学习')
-      return
+      try {
+        await saveAllDirtyForms()
+      } catch {
+        return
+      }
     }
     const incompleteLabels = record.workflow_nodes
       .filter((node) => !['daily_close', 'daily_complete'].includes(node.node_key) && node.status === 'pending')
@@ -1826,8 +1859,19 @@ export function DailyRecordPage() {
                                   <FileText size={14} aria-hidden="true" />
                                   <span>{attachment.original_name}</span>
                                   <small>{Math.max(1, Math.round(attachment.size_bytes / 1024))} KB</small>
+                                  <small>
+                                    {attachment.grading_input_mode === 'multimodal_image'
+                                      ? `原图直读 · OCR 辅助 ${attachment.extracted_text_length} 字`
+                                      : `文本提取 ${attachment.extracted_text_length} 字`}
+                                  </small>
                                   {attachment.processing_status === 'ready_truncated' && <small title="为控制批改上下文长度，仅使用前 50000 个字符">文字已截取</small>}
                                   <button type="button" disabled={attachmentBusyItemId === activeExerciseItem.id} aria-label={`移除附件 ${attachment.original_name}`} onClick={() => void deleteExerciseAttachment(activeExerciseItem.id, attachment.id)}><X size={13} /></button>
+                                  {attachment.extracted_text_preview && (
+                                    <details className="answer-attachment-ocr">
+                                      <summary>查看 OCR 文本</summary>
+                                      <p>{attachment.extracted_text_preview}</p>
+                                    </details>
+                                  )}
                                 </li>
                               ))}
                             </ul>

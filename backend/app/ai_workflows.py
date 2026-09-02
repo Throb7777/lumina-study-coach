@@ -10,7 +10,7 @@ from sqlalchemy.orm import Session, joinedload, selectinload
 
 from app.ai_output_validation import AiOutputValidationError
 from app.ai_preferences import codex_preference, gemini_cli_model, gemini_preference
-from app.ai_providers import AiProviderError, AiProviderResult, AiService
+from app.ai_providers import AiLocalImage, AiProviderError, AiProviderResult, AiService
 from app.markdown import normalize_ai_markdown, normalize_generated_markdown
 from app.materials import MaterialEvidence, MaterialReference, retrieve_material_evidence
 from app.models import (
@@ -827,6 +827,7 @@ async def run_codex(
     material_context_session: MaterialContextSession | None = None,
     existing_run: AiRun | None = None,
     payload_validator: Callable[[dict[str, Any]], None] | None = None,
+    local_images: list[AiLocalImage] | None = None,
 ) -> AiProviderResult:
     preference = codex_preference(session)
     if existing_run is None:
@@ -873,6 +874,8 @@ async def run_codex(
         ACTIVE_AI_TASKS[run.id] = current_task
     try:
         provider_options: dict[str, Any] = {}
+        if local_images:
+            provider_options["local_images"] = local_images
         if material_context_session is not None:
             provider_options["persistent"] = True
             provider_options["readable_roots"] = [Path(material_context_session.workspace_path)]

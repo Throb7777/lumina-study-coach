@@ -192,6 +192,9 @@ export interface ExerciseResponseAttachment {
   media_type: string
   size_bytes: number
   processing_status: string
+  grading_input_mode: 'multimodal_image' | 'extracted_text'
+  extracted_text_length: number
+  extracted_text_preview: string
 }
 
 export interface ExerciseItem {

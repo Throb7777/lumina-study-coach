@@ -45,6 +45,7 @@ from app.ai_preferences import (
 )
 from app.ai_providers import (
     PROVIDER_PROBE_TIMEOUT_SECONDS,
+    AiLocalImage,
     AiModelOption,
     AiProviderError,
     AiService,
@@ -81,6 +82,7 @@ from app.answer_attachments import (
     detected_media_type,
     extract_attachment_text,
     remove_attachment_files,
+    resolve_attachment_path,
     safe_original_name,
     validate_image_dimensions,
 )
@@ -1325,6 +1327,7 @@ async def generate_ai_practice(
 @router.post("/exercises/{exercise_id}/ai-grade", response_model=ExerciseRead)
 async def generate_ai_grading(
     exercise_id: int,
+    request: Request,
     session: SessionDependency,
     ai_service: AiServiceDependency,
 ) -> Exercise:
@@ -1357,6 +1360,33 @@ async def generate_ai_grading(
         else None
     )
     if recovered_payload is None:
+        local_images: list[AiLocalImage] = []
+        if structured:
+            attachment_root = request.app.state.answer_attachment_dir
+            for item in exercise.items:
+                if item.response is None:
+                    continue
+                for attachment in item.response.attachments:
+                    if not attachment.media_type.startswith("image/"):
+                        continue
+                    try:
+                        image_path = resolve_attachment_path(
+                            attachment_root,
+                            attachment.storage_path,
+                        )
+                    except AnswerAttachmentError as error:
+                        raise HTTPException(status_code=409, detail=str(error)) from error
+                    if not image_path.is_file():
+                        raise HTTPException(
+                            status_code=409,
+                            detail=f"第 {item.position} 题作答图片不存在，请重新上传",
+                        )
+                    local_images.append(
+                        AiLocalImage(
+                            image_path,
+                            f"第 {item.position} 题作答附件：{attachment.original_name}",
+                        )
+                    )
         try:
             result = await run_codex(
                 session,
@@ -1374,6 +1404,7 @@ async def generate_ai_grading(
                 payload_validator=(
                     grading_output_validator(expected_positions) if structured else None
                 ),
+                local_images=local_images,
             )
         except AiProviderError as error:
             raise ai_http_error(error) from error
