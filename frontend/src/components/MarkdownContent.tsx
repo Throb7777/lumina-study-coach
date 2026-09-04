@@ -3,7 +3,7 @@ import rehypeKatex from 'rehype-katex'
 import remarkGfm from 'remark-gfm'
 import remarkMath from 'remark-math'
 import 'katex/dist/katex.min.css'
-import { normalizeMarkdownMath } from '../markdown'
+import { normalizeCompactFeedbackMath, normalizeMarkdownMath } from '../markdown'
 
 const calloutLabels: Record<string, string> = {
   abstract: '概要',
@@ -23,7 +23,16 @@ function normalizeObsidianCallouts(content: string) {
   )
 }
 
-export function MarkdownContent({ content, className = '' }: { content: string; className?: string }) {
+export function MarkdownContent({
+  content,
+  className = '',
+  compactMath = false,
+}: {
+  content: string
+  className?: string
+  compactMath?: boolean
+}) {
+  const normalizedContent = normalizeObsidianCallouts(content)
   return (
     <div className={`markdown-content ${className}`.trim()}>
       <ReactMarkdown
@@ -47,7 +56,9 @@ export function MarkdownContent({ content, className = '' }: { content: string; 
           },
         }}
       >
-        {normalizeMarkdownMath(normalizeObsidianCallouts(content))}
+        {compactMath
+          ? normalizeCompactFeedbackMath(normalizedContent)
+          : normalizeMarkdownMath(normalizedContent)}
       </ReactMarkdown>
     </div>
   )

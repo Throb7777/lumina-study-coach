@@ -133,6 +133,10 @@ class FakeCodex:
         self.last_options: dict = {}
         self.display_markdown = "AI 生成结果"
         self.grading_feedback_markdown = "Answer accepted."
+        self.guided_review_feedback_markdown = [
+            f"第 {index} 题反馈" for index in range(1, 4)
+        ]
+        self.guided_review_display_markdown = "整体复习建议"
 
     async def login(self) -> dict[str, str]:
         return {"auth_url": "https://example.test/login", "login_id": "login-1"}
@@ -192,11 +196,13 @@ class FakeCodex:
                         {
                             "id": f"q{index}",
                             "verdict": "correct" if index == 1 else "partial",
-                            "feedback_markdown": f"第 {index} 题反馈",
+                            "feedback_markdown": self.guided_review_feedback_markdown[
+                                index - 1
+                            ],
                         }
                         for index in range(1, 4)
                     ],
-                    "display_markdown": "整体复习建议",
+                    "display_markdown": self.guided_review_display_markdown,
                     "handoff": handoff,
                 },
                 ensure_ascii=False,
@@ -527,6 +533,12 @@ def test_guided_reflection_questions_answers_and_review(
     app: FastAPI,
 ) -> None:
     app.state.ai_service = FakeAiService()
+    app.state.ai_service.codex.guided_review_feedback_markdown[0] = (
+        "似然可写为\n\n$$L(\\theta)=1$$"
+    )
+    app.state.ai_service.codex.guided_review_display_markdown = (
+        "总体结论满足\n\n$$P(A)=1$$"
+    )
     _, _, record = create_record(client)
 
     generated = client.post(
@@ -554,9 +566,12 @@ def test_guided_reflection_questions_answers_and_review(
     assert saved.status_code == 200
     reviewed = client.post(f"/api/guided-reflections/{reflection['id']}/review")
     assert reviewed.status_code == 200
-    assert reviewed.json()["feedback_text"] == "整体复习建议"
+    assert reviewed.json()["feedback_text"] == "总体结论满足 $P(A)=1$"
     assert [item["id"] for item in reviewed.json()["reviews"]] == ["q1", "q2", "q3"]
     assert reviewed.json()["reviews"][1]["verdict"] == "partial"
+    assert reviewed.json()["reviews"][0]["feedback_markdown"] == (
+        r"似然可写为 $L(\theta)=1$"
+    )
 
     daily_record = client.get(f"/api/daily-records/{record['id']}").json()
     assert daily_record["guided_reflections"][0]["answers"]["q3"] == "回答三"

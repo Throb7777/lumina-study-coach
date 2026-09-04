@@ -1,8 +1,65 @@
+import pytest
+
 from app.markdown import (
     normalize_ai_markdown,
+    normalize_compact_generated_markdown,
     normalize_generated_markdown,
     validate_note_markdown,
 )
+
+
+def test_compacts_short_feedback_formulas_but_preserves_structured_math() -> None:
+    source = r"""likelihood 可写为
+
+$$
+L(\theta)=\prod_{i=1}^{n}f(x_i\mid\theta)
+$$
+
+矩阵推导如下：
+
+$$
+\begin{aligned}x&=1\\y&=2\end{aligned}
+$$"""
+
+    expected = (
+        r"likelihood 可写为 $L(\theta)=\prod_{i=1}^{n}f(x_i\mid\theta)$"
+        "\n\n矩阵推导如下：\n\n"
+        "$$\n"
+        r"\begin{aligned}x&=1\\y&=2\end{aligned}"
+        "\n$$"
+    )
+
+    assert normalize_compact_generated_markdown(source) == expected
+
+
+@pytest.mark.parametrize("source", [
+    "正文\n\n```text\n$$x=1$$\n```",
+    "示例 `$$x=1$$` 不变。",
+    "正文\n\n    $$x=1$$",
+    "$$\nx=1\ny=2\n$$",
+    "$$\n\\begin{cases}x&=1\\\\y&=2\\end{cases}\n$$",
+    "$$" + "x+" * 100 + "1$$",
+    "$$\nx=1",
+    "可得\n\n$x=1$",
+])
+def test_compact_feedback_preserves_code_and_explicit_structure(source: str) -> None:
+    assert normalize_compact_generated_markdown(source) == source
+
+
+@pytest.mark.parametrize("prefix", ["# 定义：", "---", "独立段落。", "```", "> 引用："])
+def test_compact_feedback_does_not_merge_unrelated_blocks(prefix: str) -> None:
+    if prefix == "```":
+        prefix = "```text\ncode\n```"
+    assert normalize_compact_generated_markdown(prefix + "\n\n$$x=1$$") == (
+        prefix + "\n\n$x=1$"
+    )
+
+
+def test_compact_feedback_is_idempotent() -> None:
+    source = "- 可得\n\n$$x=1$$\n\n最大化它等价于最大化\n\n$$L=x$$"
+    result = normalize_compact_generated_markdown(source)
+    assert result == "- 可得 $x=1$\n\n最大化它等价于最大化 $L=x$"
+    assert normalize_compact_generated_markdown(result) == result
 
 
 def test_normalizes_obsidian_math_delimiters_and_outer_fence() -> None:

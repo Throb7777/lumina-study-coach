@@ -2,9 +2,29 @@ import pytest
 
 from app.ai_output_validation import (
     AiOutputValidationError,
+    guided_review_output_validator,
     validate_practice_output,
     validate_preview_output,
 )
+
+
+def test_guided_review_validation_compacts_short_feedback_formulas() -> None:
+    payload = {
+        "reviews": [
+            {
+                "id": f"q{index}",
+                "verdict": "correct",
+                "feedback_markdown": f"结论可写为\n\n$$x_{index}=1$$",
+            }
+            for index in range(1, 4)
+        ],
+        "display_markdown": "总体满足\n\n$$P(A)=1$$",
+    }
+
+    guided_review_output_validator(["q1", "q2", "q3"])(payload)
+
+    assert payload["reviews"][0]["feedback_markdown"] == "结论可写为 $x_1=1$"
+    assert payload["display_markdown"] == "总体满足 $P(A)=1$"
 
 
 def practice_payload() -> dict:

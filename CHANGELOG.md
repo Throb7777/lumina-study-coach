@@ -16,6 +16,12 @@ All notable public changes to Lumina are documented in this file.
 
 ### Fixed
 
+- Keep short recall and reconstruction feedback formulas inline with their
+  introductory text, while preserving long formulas and structured derivations.
+- Prevent feedback description styles from shrinking or fading rendered math.
+- Label completed sections as study again without resetting existing records.
+- Use consistent, distinct correct, partial, and incorrect grading colors, with
+  a separate selection outline that preserves the verdict color.
 - Carry the previous study record's preview questions into the next record and
   review earlier learning instead of the material that is about to be studied.
 - Avoid duplicated or overly broad AI practice questions and hide unavailable
@@ -59,7 +65,8 @@ All notable public changes to Lumina are documented in this file.
 - The v0.1.3 Windows assets were refreshed on 2026-08-25 for section-note
   recovery, on 2026-08-26 for exercise-grading recovery, on 2026-08-28 for
   AI-output sanitisation and Codex transport recovery, and on 2026-09-02 for
-  multimodal image grading and study-flow reliability. The version number
+  multimodal image grading and study-flow reliability, and on 2026-09-04 for
+  feedback typography, study-again labels, and grading colors. The version number
   remains unchanged and existing local learning data is preserved during an
   upgrade.
 

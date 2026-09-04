@@ -30,6 +30,11 @@ DUPLICATE_LATEX_COMMAND = re.compile(
     r"sum|prod|int|lim|log|ln|sin|cos|tan|exp|omega|alpha|beta|gamma|delta|theta|"
     r"lambda|mu|sigma|phi|psi|rho|varepsilon|partial|nabla)\b)"
 )
+SHORT_DISPLAY_MATH = re.compile(r"\$\$[ \t]*(?P<body>[^$\n]+?)[ \t]*\$\$")
+STRUCTURED_DISPLAY_MATH = re.compile(
+    r"\\(?:begin|end|tag|displaylines|substack)\b|\\\\|&"
+)
+FORMULA_INTRODUCTION = re.compile(r"(?:为|得|满足|即|等于|最大化|[:：=])$")
 
 
 @dataclass(frozen=True)
@@ -110,6 +115,96 @@ def normalize_generated_markdown(content: str) -> str:
         return normalize_ai_markdown(content)
     except ValueError:
         return normalize_ai_markdown(FORBIDDEN_CONTROL.sub("", content))
+
+
+def _compact_short_display_math(content: str) -> str:
+    """Keep short feedback formulas with their introducing sentence."""
+    lines = content.splitlines()
+    compacted: list[str] = []
+    active_fence: str | None = None
+    index = 0
+
+    def compact_body(body: str) -> str | None:
+        body = body.strip()
+        if (
+            not body
+            or len(body) > 180
+            or STRUCTURED_DISPLAY_MATH.search(body)
+        ):
+            return None
+        return f"${body}$"
+
+    def append_formula(formula: str) -> None:
+        previous_index = len(compacted) - 1
+        while previous_index >= 0 and not compacted[previous_index].strip():
+            previous_index -= 1
+        if (
+            previous_index >= 0
+            and not compacted[previous_index].lstrip().startswith(("#", ">", "|"))
+            and FORMULA_INTRODUCTION.search(compacted[previous_index].rstrip())
+        ):
+            compacted[previous_index:] = [
+                f"{compacted[previous_index].rstrip()} {formula}"
+            ]
+        else:
+            compacted.append(formula)
+
+    while index < len(lines):
+        line = lines[index]
+        fence_match = FENCE_LINE.match(line)
+        if fence_match:
+            marker = fence_match.group(1)[0]
+            active_fence = None if active_fence == marker else marker
+            compacted.append(line)
+            index += 1
+            continue
+        if active_fence is not None:
+            compacted.append(line)
+            index += 1
+            continue
+
+        if "`" in line or line.startswith(("    ", "\t")):
+            compacted.append(line)
+            index += 1
+            continue
+
+        if line.strip() == "$$":
+            closing_index = index + 1
+            while closing_index < len(lines) and lines[closing_index].strip() != "$$":
+                closing_index += 1
+            formula = (
+                compact_body(lines[index + 1])
+                if closing_index < len(lines) and closing_index == index + 2 else None
+            )
+            if formula is not None:
+                append_formula(formula)
+            else:
+                compacted.extend(lines[index : closing_index + 1])
+            index = closing_index + 1
+            continue
+
+        original = line
+        line = SHORT_DISPLAY_MATH.sub(
+            lambda match: compact_body(match.group("body")) or match.group(0),
+            line,
+        )
+        if line != original and re.fullmatch(r"\$[^$\n]+\$", line.strip()):
+            append_formula(line.strip())
+        else:
+            compacted.append(line)
+        index += 1
+
+    return "\n".join(compacted).strip()
+
+
+def normalize_compact_ai_markdown(content: str) -> str:
+    """Normalize persisted feedback and compact only safe, short display math."""
+    return _compact_short_display_math(normalize_ai_markdown(content))
+
+
+def normalize_compact_generated_markdown(content: str) -> str:
+    """Normalize generated feedback and compact only safe, short display math."""
+    return _compact_short_display_math(normalize_generated_markdown(content))
 
 
 def validate_note_markdown(content: str) -> tuple[str, list[MarkdownIssue]]:

@@ -18,6 +18,28 @@ $$P(A\mid B)=\frac{P(A\cap B)}{P(B)}$$`} />,
     expect(container.querySelector('.katex-html')).not.toBeNull()
   })
 
+  it('keeps short feedback formulas inline and preserves structured display math', () => {
+    const { container } = render(
+      <MarkdownContent
+        compactMath
+        content={String.raw`likelihood 可写为
+
+$$L(\theta)=\prod_{i=1}^{n}f(x_i\mid\theta)$$
+
+矩阵推导如下：
+
+$$
+\begin{aligned}x&=1\\y&=2\end{aligned}
+$$`}
+      />,
+    )
+
+    const firstParagraph = container.querySelector('p')
+    expect(firstParagraph).toHaveTextContent('likelihood 可写为')
+    expect(firstParagraph?.querySelector('.katex')).not.toBeNull()
+    expect(container.querySelectorAll('.katex-display')).toHaveLength(1)
+  })
+
   it('opens generated content in reading mode and allows editing', async () => {
     const user = userEvent.setup()
     const { rerender } = render(

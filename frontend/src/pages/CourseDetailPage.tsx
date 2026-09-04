@@ -11,6 +11,7 @@ import {
   Pencil,
   Play,
   Plus,
+  RotateCcw,
   Trash2,
 } from 'lucide-react'
 import { Link, useLoaderData, useNavigate } from 'react-router-dom'
@@ -123,9 +124,9 @@ function getConfirmDialogConfig(action: ConfirmAction, courseName: string): Conf
       }
     case 'continue-section':
       return {
-        title: '继续学习这个小节？',
-        description: `“${action.section.title}”已经完成。确认后仍会创建或打开今天的学习记录。`,
-        confirmLabel: '继续学习',
+        title: '再次学习这个小节？',
+        description: `“${action.section.title}”此前的学习记录和笔记都会保留。确认后将打开今天已有的记录，或创建一条新的今日学习记录。`,
+        confirmLabel: '再次学习',
         variant: 'default',
       }
   }
@@ -824,6 +825,7 @@ export function CourseDetailPage() {
                   ? dailyRecords
                   : dailyRecords.slice(0, HISTORY_PREVIEW_COUNT)
                 const hasTodayRecord = dailyRecords.some((record) => record.study_date === todayDate)
+                const isCompleted = section.status === 'completed'
 
                 return (
                 <div className="section-entry" key={section.id}>
@@ -851,10 +853,10 @@ export function CourseDetailPage() {
                         disabled={openingSectionId !== null}
                         onClick={(event) => handleOpenSection(section, event.currentTarget)}
                       >
-                        <Play size={15} />
+                        {isCompleted ? <RotateCcw size={15} /> : <Play size={15} />}
                         {openingSectionId === section.id
                           ? '正在打开'
-                          : hasTodayRecord ? '继续学习' : '开始学习'}
+                          : isCompleted ? '再次学习' : hasTodayRecord ? '继续学习' : '开始学习'}
                       </button>
                     </div>
                   </div>

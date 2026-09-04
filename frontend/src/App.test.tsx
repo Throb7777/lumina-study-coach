@@ -729,6 +729,39 @@ describe('App', () => {
     expect(await screen.findByRole('button', { name: '继续学习' })).toBeInTheDocument()
   })
 
+  it.each([false, true])('offers to study a completed section again without implying a reset (today: %s)', async (hasToday) => {
+    const now = new Date()
+    const today = [now.getFullYear(), String(now.getMonth() + 1).padStart(2, '0'), String(now.getDate()).padStart(2, '0')].join('-')
+    const completedCourse = {
+      ...courseWithOutline,
+      chapters: courseWithOutline.chapters.map((chapter) => ({
+        ...chapter,
+        sections: chapter.sections.map((section) => ({
+          ...section,
+          status: 'completed',
+          daily_records: hasToday ? [{ id: 9, study_date: today, is_completed: true }] : [],
+        })),
+      })),
+    }
+    const fetchMock = vi.fn()
+      .mockImplementationOnce(() => jsonResponse(completedCourse))
+      .mockImplementationOnce(() => jsonResponse({ detail: '小节已完成' }, 409))
+    vi.stubGlobal('fetch', fetchMock)
+    const user = userEvent.setup()
+
+    renderApp(['/courses/1'])
+
+    await user.click(await screen.findByRole('button', { name: '再次学习' }))
+    const dialog = await screen.findByRole('dialog', { name: '再次学习这个小节？' })
+    expect(within(dialog).getByText(/学习记录和笔记都会保留/)).toBeInTheDocument()
+    expect(within(dialog).getByRole('button', { name: '再次学习' })).toBeInTheDocument()
+    expect(within(dialog).queryByText(/重置|清空/)).not.toBeInTheDocument()
+    await user.click(within(dialog).getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog')).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalledTimes(2)
+    expect(screen.getByRole('button', { name: '再次学习' })).toBeInTheDocument()
+  })
+
   it('starts section history collapsed even when an older session stored an expanded section', async () => {
     sessionStorage.setItem('learning-flow-coach.course-1.expanded-history', '2')
     vi.stubGlobal('fetch', vi.fn().mockImplementationOnce(() => jsonResponse(courseWithRecordHistory)))

@@ -1,5 +1,32 @@
 import { describe, expect, it } from 'vitest'
-import { hasLegacyMathDelimiters, normalizeMarkdownMath } from './markdown'
+import { hasLegacyMathDelimiters, normalizeCompactFeedbackMath, normalizeMarkdownMath } from './markdown'
+
+describe('Compact feedback formulas', () => {
+  it.each([
+    '正文\n\n```text\n$$x=1$$\n```',
+    '示例 `$$x=1$$` 不变。',
+    '正文\n\n    $$x=1$$',
+    '$$\nx=1\ny=2\n$$',
+    String.raw`$$\begin{cases}x&=1\\y&=2\end{cases}$$`,
+    `$$${'x+'.repeat(100)}1$$`,
+    '$$\nx=1',
+    '可得\n\n$x=1$',
+  ])('preserves code and explicit structure: %s', (source) => {
+    expect(normalizeCompactFeedbackMath(source)).toBe(source)
+  })
+
+  it.each(['# 定义：', '---', '独立段落。', '```text\ncode\n```', '> 引用：'])(
+    'keeps unrelated blocks separate: %s', (prefix) => {
+      expect(normalizeCompactFeedbackMath(`${prefix}\n\n$$x=1$$`)).toBe(`${prefix}\n\n$x=1$`)
+    },
+  )
+
+  it('joins short formulas to their introduction and is idempotent', () => {
+    const result = normalizeCompactFeedbackMath('- 可得\n\n$$x=1$$\n\n最大化它等价于最大化\n\n$$L=x$$')
+    expect(result).toBe('- 可得 $x=1$\n\n最大化它等价于最大化 $L=x$')
+    expect(normalizeCompactFeedbackMath(result)).toBe(result)
+  })
+})
 
 describe('Markdown math normalization', () => {
   it('converts legacy delimiters outside code fences', () => {

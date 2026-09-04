@@ -174,6 +174,9 @@ def guided_reflection_review_prompt(
 - `feedback_markdown` 必须对应该题实际回答，指出判断依据；
 - 回答错误或不完整时给出正确思路，但不要扩写成整份课程笔记；
 - `display_markdown` 只放三题之外的整体总结，避免重复逐题反馈。
+- `feedback_markdown` 和 `display_markdown` 中的短单行公式必须使用行内公式，
+  并与“可写为”“可得”“满足”等引导语放在同一段；只有矩阵、分情况表达、
+  多行推导或确实过长的公式才使用独立公式块。
 
 {MARKDOWN_MATH_RULES}
 {STRUCTURED_RESULT_RULES}

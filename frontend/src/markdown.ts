@@ -5,6 +5,9 @@ const inlineDisplayMath = /\\\[([^\n]+?)\\\]/g
 const htmlBreak = /<br\s*\/?>/gi
 const inlineMath = /(?<!\\)(?<!\$)\$(?!\$)(.+?)(?<!\\)\$(?!\$)/g
 const duplicateLatexCommand = /(?<!\\)\\\\(?=(?:begin|end|mathrm|operatorname|text|frac|dfrac|tfrac|sqrt|mathbb|mathbf|mathcal|mathit|mathsf|mathtt|overline|underline|hat|bar|vec|sum|prod|int|lim|log|ln|sin|cos|tan|exp|omega|alpha|beta|gamma|delta|theta|lambda|mu|sigma|phi|psi|rho|varepsilon|partial|nabla)\b)/g
+const shortDisplayMath = /\$\$[ \t]*([^$\n]+?)[ \t]*\$\$/g
+const structuredDisplayMath = /\\(?:begin|end|tag|displaylines|substack)\b|\\\\|&/
+const formulaIntroduction = /(?:为|得|满足|即|等于|最大化|[:：=])$/
 
 function controlPattern(code: number, suffix: string) {
   return new RegExp(`${String.fromCharCode(code)}${suffix}`, 'g')
@@ -79,6 +82,73 @@ export function normalizeMarkdownMath(content: string) {
   }
 
   return normalized.join('\n').trim()
+}
+
+export function normalizeCompactFeedbackMath(content: string) {
+  const lines = normalizeMarkdownMath(content).split(/\r?\n/)
+  const compacted: string[] = []
+  let activeFence: string | null = null
+
+  function compactBody(body: string) {
+    const value = body.trim()
+    if (!value || value.length > 180 || structuredDisplayMath.test(value)) return null
+    return `$${value}$`
+  }
+
+  function appendFormula(formula: string) {
+    let previousIndex = compacted.length - 1
+    while (previousIndex >= 0 && !compacted[previousIndex].trim()) previousIndex -= 1
+    const previous = compacted[previousIndex]
+    if (previous && !/^[#>|]/.test(previous.trimStart()) && formulaIntroduction.test(previous.trimEnd())) {
+      compacted.splice(previousIndex, compacted.length - previousIndex, `${previous.trimEnd()} ${formula}`)
+    } else {
+      compacted.push(formula)
+    }
+  }
+
+  for (let index = 0; index < lines.length; index += 1) {
+    let line = lines[index]
+    const fenceMatch = line.match(fenceLine)
+    if (fenceMatch) {
+      const marker = fenceMatch[1][0]
+      activeFence = activeFence === marker ? null : marker
+      compacted.push(line)
+      continue
+    }
+    if (activeFence !== null) {
+      compacted.push(line)
+      continue
+    }
+
+    if (line.includes('`') || /^( {4}|\t)/.test(line)) {
+      compacted.push(line)
+      continue
+    }
+
+    if (line.trim() === '$$') {
+      let closingIndex = index + 1
+      while (closingIndex < lines.length && lines[closingIndex].trim() !== '$$') closingIndex += 1
+      const formula = closingIndex < lines.length && closingIndex === index + 2
+        ? compactBody(lines[index + 1]) : null
+      if (formula !== null) {
+        appendFormula(formula)
+      } else {
+        compacted.push(...lines.slice(index, closingIndex + 1))
+      }
+      index = closingIndex
+      continue
+    }
+
+    const original = line
+    line = line.replace(shortDisplayMath, (match, body: string) => compactBody(body) ?? match)
+    if (line !== original && /^\$[^$\n]+\$$/.test(line.trim())) {
+      appendFormula(line.trim())
+    } else {
+      compacted.push(line)
+    }
+  }
+
+  return compacted.join('\n').trim()
 }
 
 export function hasLegacyMathDelimiters(content: string) {

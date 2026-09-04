@@ -152,7 +152,7 @@ function GuidedReflectionPanel({
             {review && (
               <div className={`guided-question__review guided-question__review--${review.verdict}`}>
                 <strong>{exerciseVerdictLabels[review.verdict] ?? review.verdict}</strong>
-                <MarkdownContent content={review.feedback_markdown} />
+                <MarkdownContent content={review.feedback_markdown} compactMath />
               </div>
             )}
           </label>
@@ -170,7 +170,7 @@ function GuidedReflectionPanel({
       {((reflection.reviews ?? []).length > 0 || reflection.feedback_text) && (
         <section className="guided-reflection__feedback">
           <div><strong>综合反馈</strong><span>上方已逐题标注，下面给出整体建议</span></div>
-          {reflection.feedback_text && <MarkdownContent content={reflection.feedback_text} />}
+          {reflection.feedback_text && <MarkdownContent content={reflection.feedback_text} compactMath />}
           <div className="form-actions">
             <button className="primary-button" type="button" disabled={busy} onClick={onComplete}>
               <Check size={15} />{completeLabel}
@@ -1649,7 +1649,7 @@ export function DailyRecordPage() {
             />
           )}
           {!recallReflection && legacyRecallInteraction?.feedback_text && (
-            <details className="legacy-ai-feedback"><summary>查看旧版回顾评阅</summary><MarkdownContent content={legacyRecallInteraction.feedback_text} /></details>
+            <details className="legacy-ai-feedback"><summary>查看旧版回顾评阅</summary><MarkdownContent content={legacyRecallInteraction.feedback_text} compactMath /></details>
           )}
         </FlowNode>
 
@@ -1729,7 +1729,7 @@ export function DailyRecordPage() {
             />
           )}
           {!reconstructionReflection && legacyReconstructionInteraction?.feedback_text && (
-            <details className="legacy-ai-feedback"><summary>查看旧版重构评阅</summary><MarkdownContent content={legacyReconstructionInteraction.feedback_text} /></details>
+            <details className="legacy-ai-feedback"><summary>查看旧版重构评阅</summary><MarkdownContent content={legacyReconstructionInteraction.feedback_text} compactMath /></details>
           )}
         </FlowNode>
 

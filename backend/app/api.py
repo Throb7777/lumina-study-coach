@@ -94,7 +94,11 @@ from app.data_archive import (
 )
 from app.database import get_session
 from app.exports import build_markdown_archive
-from app.markdown import normalize_ai_markdown, validate_note_markdown
+from app.markdown import (
+    normalize_ai_markdown,
+    normalize_compact_ai_markdown,
+    validate_note_markdown,
+)
 from app.material_sessions import (
     ensure_material_context,
     inline_material_context,
@@ -1174,7 +1178,7 @@ async def review_guided_reflection(
             {
                 "id": str(item["id"]),
                 "verdict": str(item["verdict"]),
-                "feedback_markdown": normalize_ai_markdown(
+                "feedback_markdown": normalize_compact_ai_markdown(
                     str(item["feedback_markdown"])
                 ),
             }
@@ -1182,7 +1186,7 @@ async def review_guided_reflection(
         ],
         ensure_ascii=False,
     )
-    reflection.feedback_text = normalize_ai_markdown(
+    reflection.feedback_text = normalize_compact_ai_markdown(
         str(review_payload["display_markdown"])
     )
     session.commit()

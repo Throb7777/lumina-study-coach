@@ -5,7 +5,7 @@ from difflib import SequenceMatcher
 from typing import Any
 
 from app.ai_providers import AiProviderError
-from app.markdown import normalize_generated_markdown
+from app.markdown import normalize_compact_generated_markdown, normalize_generated_markdown
 
 
 class AiOutputValidationError(AiProviderError):
@@ -48,6 +48,17 @@ def guided_review_output_validator(
             if isinstance(item, dict)
         ):
             raise AiOutputValidationError("回顾批改包含空反馈")
+        for item in reviews:
+            if isinstance(item, dict):
+                item["feedback_markdown"] = normalize_compact_generated_markdown(
+                    str(item["feedback_markdown"])
+                )
+        display_markdown = payload.get("display_markdown")
+        if not isinstance(display_markdown, str) or not display_markdown.strip():
+            raise AiOutputValidationError("回顾批改缺少整体反馈")
+        payload["display_markdown"] = normalize_compact_generated_markdown(
+            display_markdown
+        )
 
     return validate
 
