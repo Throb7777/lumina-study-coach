@@ -13,7 +13,7 @@ from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from tempfile import TemporaryDirectory
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, urlsplit
 
 import httpx
 from bs4 import BeautifulSoup
@@ -693,61 +693,110 @@ def video_chunks(content: bytes) -> list[tuple[str, int | None, str]]:
     return chunks
 
 
+def _video_subtitle_candidates(info: dict) -> list[dict]:
+    candidates = []
+    for source_rank, key in enumerate(("subtitles", "automatic_captions")):
+        for language, formats in (info.get(key) or {}).items():
+            base_language = language.lower().split("-", 1)[0]
+            if base_language not in {"zh", "en"}:
+                continue
+            subtitle = next((item for item in formats if item.get("ext") == "vtt"), None)
+            if not subtitle or not subtitle.get("url"):
+                continue
+            # YouTube exposes translated captions alongside native automatic captions.
+            translated = "tlang" in parse_qs(urlsplit(subtitle["url"]).query)
+            rank = (
+                2 if translated else source_rank,
+                0 if base_language == "zh" else 1,
+                0 if language == "zh-Hans" or language.endswith("-orig") else 1,
+                language,
+            )
+            candidates.append((rank, subtitle))
+    selected = []
+    seen = set()
+    for _, subtitle in sorted(candidates, key=lambda item: item[0]):
+        if subtitle["url"] not in seen:
+            selected.append(subtitle)
+            seen.add(subtitle["url"])
+    return selected
+
+
+def _video_rate_limited(error: Exception) -> bool:
+    message = str(error).lower()
+    return getattr(error, "status", None) == 429 or any(
+        marker in message for marker in ("429", "too many requests")
+    )
+
+
 def fetch_video_transcript(
     url: str,
 ) -> tuple[str, str, bytes, list[tuple[str, int | None, str]]]:
     validate_public_url(url)
     try:
         from yt_dlp import YoutubeDL
+        from yt_dlp.networking import Request
     except ImportError as error:
         raise MaterialError("视频字幕组件尚未安装") from error
 
-    with TemporaryDirectory(prefix="learning-flow-video-") as temporary:
-        output = str(Path(temporary) / "subtitle.%(ext)s")
-        environment = build_subprocess_environment()
-        proxy = environment.get("HTTPS_PROXY") or environment.get("https_proxy")
-        options = {
-            "skip_download": True,
-            "writesubtitles": True,
-            "writeautomaticsub": True,
-            "subtitleslangs": ["zh-Hans", "zh-Hant", "zh", "en"],
-            "subtitlesformat": "vtt",
-            "outtmpl": output,
-            "quiet": True,
-            "no_warnings": True,
-            "noplaylist": True,
-        }
-        if proxy:
-            options["proxy"] = proxy
+    environment = build_subprocess_environment()
+    proxy = environment.get("HTTPS_PROXY") or environment.get("https_proxy")
+    options = {
+        "skip_download": True,
+        "quiet": True,
+        "no_warnings": True,
+        "noplaylist": True,
+        "cachedir": False,
+        "socket_timeout": 20,
+        "retries": 0,
+        "extractor_retries": 0,
+    }
+    if proxy:
+        options["proxy"] = proxy
+    rate_limit_message = "读取视频字幕失败：视频平台限制请求（HTTP 429），请稍后再试，避免连续重试"
+    with YoutubeDL(options) as downloader:
         info = None
         for attempt in range(REMOTE_MAX_ATTEMPTS):
             try:
-                with YoutubeDL(options) as downloader:
-                    info = downloader.extract_info(url, download=True)
+                info = downloader.extract_info(url, download=False)
                 break
             except Exception as error:
+                if _video_rate_limited(error):
+                    raise MaterialError(rate_limit_message) from error
                 message = str(error).lower()
-                transient = any(
-                    marker in message
-                    for marker in ("429", "too many requests", "timed out", "502", "503", "504")
-                )
+                transient = any(marker in message for marker in ("timed out", "502", "503", "504"))
                 if not transient or attempt == REMOTE_MAX_ATTEMPTS - 1:
                     raise MaterialError(f"读取视频字幕失败：{error}") from error
                 time.sleep(float(2**attempt))
         if info is None:
             raise MaterialError("读取视频字幕失败：没有收到响应")
-        files = sorted(Path(temporary).glob("subtitle*.vtt"))
-        if not files:
+        candidates = _video_subtitle_candidates(info)
+        if not candidates:
             raise MaterialError("视频没有可用的中文或英文字幕")
-        content = files[0].read_bytes()
         final_url = str(info.get("webpage_url") or url)
         validate_public_url(final_url)
-        return (
-            final_url,
-            str(info.get("title") or ""),
-            content,
-            video_chunks(content),
-        )
+        last_error = None
+        consecutive_rate_limits = 0
+        # Try a few distinct tracks, never restart metadata extraction after a track fails.
+        for subtitle in candidates[:4]:
+            try:
+                validate_public_url(subtitle["url"])
+                headers = subtitle.get("http_headers") or info.get("http_headers") or {}
+                with downloader.urlopen(Request(subtitle["url"], headers=headers)) as response:
+                    content = response.read(MAX_URL_BYTES + 1)
+                if len(content) > MAX_URL_BYTES:
+                    raise MaterialError("视频字幕超过大小限制")
+                chunks = video_chunks(content)
+                return final_url, str(info.get("title") or ""), content, chunks
+            except Exception as error:
+                last_error = error
+                consecutive_rate_limits = (
+                    consecutive_rate_limits + 1 if _video_rate_limited(error) else 0
+                )
+                if consecutive_rate_limits >= 2:
+                    break
+        if consecutive_rate_limits:
+            raise MaterialError(rate_limit_message) from last_error
+        raise MaterialError(f"读取视频字幕失败：{last_error}") from last_error
 
 
 def save_chunks(
